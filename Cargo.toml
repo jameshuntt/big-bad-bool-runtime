@@ -3,18 +3,23 @@ name = "big-bad-bool-runtime"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+license = "MIT OR Apache-2.0"
 authors = ["James Hunt"]
 description = "A deterministic runtime for many verified big-bad-bool programs on one scope: prepare, admit, commit, with bounded mailboxes, logical timers, admission policies and a replayable trace."
-license = "MIT OR Apache-2.0"
+repository = "https://github.com/jameshuntt/big-bad-bool-runtime"
+documentation = "https://docs.rs/big-bad-bool-runtime"
 readme = "README.md"
 keywords = ["deterministic", "runtime", "state-machine", "replay", "bitpack"]
 categories = ["concurrency", "simulation"]
-publish = false
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []
-# Bowl observers (ob-serve-a-bowl 0.2.3 needs Rust 1.88): runtime events and program step
-# events published to an ob-serve-a-bowl runtime. Observers only.
+# Bowl observers: runtime events and program step events published to an ob-serve-a-bowl
+# runtime. Observers only. Needs Rust 1.88, the rust-version of ob-serve-a-bowl 0.2.3; without
+# it the crate builds on 1.85.
 bowl = ["dep:ob-serve-a-bowl", "big-bad-bool/program-bowl"]
 
 [dependencies]

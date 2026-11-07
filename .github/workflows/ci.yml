@@ -1,0 +1,75 @@
+# Checks every push and pull request: formatting, tests with and without the
+# bowl feature, clippy with warnings denied both ways, the docs with warnings
+# denied, and the package as crates.io would get it. Tests also run on the
+# oldest Rust this crate supports (rust-version in Cargo.toml) without
+# features; the bowl feature needs 1.88, the rust-version of ob-serve-a-bowl.
+# The examples run, the benches build. Publishing is manual for now.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test on Rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, "1.85"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - name: Dependency versions the oldest supported Rust can build
+        # the runner's newest cargo writes a fresh Cargo.lock, picking for each dependency the newest version
+        # whose rust-version this one meets
+        if: matrix.rust != 'stable'
+        run: CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +stable generate-lockfile
+      - name: Test, no features
+        run: cargo test
+      - name: Test, all features
+        if: matrix.rust == 'stable'
+        run: cargo test --all-features
+      - name: Run the examples
+        if: matrix.rust == 'stable'
+        run: |
+          cargo run --example ping_pong
+          cargo run --example logical_timer
+          cargo run --example cancellation
+          cargo run --example fan_out
+          cargo run --example mailbox_full
+          cargo run --example policies
+          cargo run --release --example contention
+      - name: Build the benches
+        if: matrix.rust == 'stable'
+        run: cargo bench --no-run
+
+  lint:
+    name: fmt, clippy, docs and package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy, no features
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy, all features
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Docs
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Package
+        run: cargo package --locked

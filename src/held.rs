@@ -67,7 +67,12 @@ impl<T> Backlog<T> {
     /// stops. Returns the disposition and whether to go on.
     pub(crate) fn settle(&mut self, tried: Tried, max_attempts: u32) -> (Disposition, bool) {
         let Some((_, attempts)) = self.entries.front_mut() else {
-            return (Disposition::Consumed { final_refusal: false }, false);
+            return (
+                Disposition::Consumed {
+                    final_refusal: false,
+                },
+                false,
+            );
         };
         let n = attempts.saturating_add(1);
         match tried {
@@ -133,7 +138,11 @@ mod tests {
     };
 
     /// One retry pass as the run does it: front, attempt, settle, stop when told.
-    fn pass(b: &mut Backlog<u32>, max: u32, mut outcome: impl FnMut(u32) -> Tried) -> Vec<(u32, Disposition)> {
+    fn pass(
+        b: &mut Backlog<u32>,
+        max: u32,
+        mut outcome: impl FnMut(u32) -> Tried,
+    ) -> Vec<(u32, Disposition)> {
         let mut seen = Vec::new();
         while let Some((input, _)) = b.front() {
             let input = *input;
@@ -163,7 +172,9 @@ mod tests {
         for i in [10, 11, 12, 13] {
             let _ = b.offer(i);
         }
-        let seen = pass(&mut b, u32::MAX, |i| if i == 12 { REFUSED } else { Tried::Committed });
+        let seen = pass(&mut b, u32::MAX, |i| {
+            if i == 12 { REFUSED } else { Tried::Committed }
+        });
         assert_eq!(
             seen,
             [
@@ -182,11 +193,21 @@ mod tests {
         let mut b = Backlog::new(2);
         let _ = b.offer(1);
         let _ = b.offer(2);
-        assert_eq!(pass(&mut b, 3, |_| REFUSED), [(1, Disposition::Kept { attempts: 2 })]);
+        assert_eq!(
+            pass(&mut b, 3, |_| REFUSED),
+            [(1, Disposition::Kept { attempts: 2 })]
+        );
         // Third attempt reaches max_attempts = 3: dropped, and retrying goes on with 2.
         assert_eq!(
-            pass(&mut b, 3, |i| if i == 1 { REFUSED } else { Tried::Committed }),
-            [(1, Disposition::Exhausted { attempts: 3 }), (2, Disposition::Committed)]
+            pass(&mut b, 3, |i| if i == 1 {
+                REFUSED
+            } else {
+                Tried::Committed
+            }),
+            [
+                (1, Disposition::Exhausted { attempts: 3 }),
+                (2, Disposition::Committed)
+            ]
         );
         assert_eq!(b.len(), 0);
     }
@@ -197,11 +218,18 @@ mod tests {
         for i in [1, 2, 3] {
             let _ = b.offer(i);
         }
-        let seen = pass(&mut b, u32::MAX, |i| if i == 1 { FINAL } else { Tried::Committed });
+        let seen = pass(&mut b, u32::MAX, |i| {
+            if i == 1 { FINAL } else { Tried::Committed }
+        });
         assert_eq!(
             seen,
             [
-                (1, Disposition::Consumed { final_refusal: true }),
+                (
+                    1,
+                    Disposition::Consumed {
+                        final_refusal: true
+                    }
+                ),
                 (2, Disposition::Committed),
                 (3, Disposition::Committed),
             ]
@@ -220,10 +248,18 @@ mod tests {
             settle_pending(REFUSED, 1),
             (Disposition::Backpressured { attempts: 2 }, Some(2))
         );
-        assert_eq!(settle_pending(Tried::Committed, 2), (Disposition::Committed, None));
+        assert_eq!(
+            settle_pending(Tried::Committed, 2),
+            (Disposition::Committed, None)
+        );
         assert_eq!(
             settle_pending(FINAL, 5),
-            (Disposition::Consumed { final_refusal: true }, None)
+            (
+                Disposition::Consumed {
+                    final_refusal: true
+                },
+                None
+            )
         );
         assert!(Disposition::Backpressured { attempts: 2 }.is_held());
         assert!(!Disposition::BacklogFull { capacity: 1 }.is_held());

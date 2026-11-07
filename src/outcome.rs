@@ -114,9 +114,9 @@ pub enum RunDiff {
         /// Index into both logs.
         index: usize,
         /// This run's event.
-        left: Option<RuntimeEvent>,
+        left: Option<Box<RuntimeEvent>>,
         /// The other run's event.
-        right: Option<RuntimeEvent>,
+        right: Option<Box<RuntimeEvent>>,
     },
     /// Scope's scheduler events differ first at `index`.
     Scheduler {
@@ -145,7 +145,10 @@ pub enum RunDiff {
     },
 }
 
-fn first_difference<T: Clone + PartialEq>(a: &[T], b: &[T]) -> Option<(usize, Option<T>, Option<T>)> {
+fn first_difference<T: Clone + PartialEq>(
+    a: &[T],
+    b: &[T],
+) -> Option<(usize, Option<T>, Option<T>)> {
     let len = a.len().max(b.len());
     (0..len).find_map(|i| {
         let (x, y) = (a.get(i), b.get(i));
@@ -197,7 +200,11 @@ impl<O, W> RunOutcome<O, W> {
             return Some(RunDiff::ProgramIds);
         }
         if let Some((index, left, right)) = first_difference(&self.log, &other.log) {
-            return Some(RunDiff::Event { index, left, right });
+            return Some(RunDiff::Event {
+                index,
+                left: left.map(Box::new),
+                right: right.map(Box::new),
+            });
         }
         if let Some((index, left, right)) = first_difference(&self.scheduler, &other.scheduler) {
             return Some(RunDiff::Scheduler { index, left, right });

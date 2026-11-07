@@ -42,9 +42,9 @@ use crate::message::RuntimeMessage;
 use crate::observer::RuntimeObserver;
 use crate::outcome::{ExternalRecord, PolicyCounts, ProgramFinal, RunOutcome};
 use crate::trace::{
-    ActionRecord, Admission, Delivery, Disposition, InputSource, Resource, Retained,
-    RuntimeEvent, RuntimeEventKind, RuntimeRefusal, SchedRecorder, SchedState, StateDigest,
-    StepRecord, StepSummary, state_digest,
+    ActionRecord, Admission, Delivery, Disposition, InputSource, Resource, Retained, RuntimeEvent,
+    RuntimeEventKind, RuntimeRefusal, SchedRecorder, SchedState, StateDigest, StepRecord,
+    StepSummary, state_digest,
 };
 
 /// The dimension id a message name resolves to when the receiver has no such dimension: the
@@ -175,7 +175,10 @@ fn release<'env>(cx: &mut Cx<'_, 'env, Shared>, directory: &Directory<'_>, resou
     for task in &woken {
         cx.wake_with(*task, WakeReason::Manual);
     }
-    directory.emit(cx.now_tick(), || RuntimeEventKind::Released { resource, woken });
+    directory.emit(cx.now_tick(), || RuntimeEventKind::Released {
+        resource,
+        woken,
+    });
 }
 
 /// Sends one message already numbered into `to`'s bounded mailbox.
@@ -432,13 +435,14 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
         }
         self.directory.held[self.index].set(0);
         let (program, halted, steps) = (slot(self.index), self.halted(), self.steps);
-        self.directory.emit(cx.now_tick(), || RuntimeEventKind::Finished {
-            program,
-            halted,
-            steps,
-            dropped,
-            held,
-        });
+        self.directory
+            .emit(cx.now_tick(), || RuntimeEventKind::Finished {
+                program,
+                halted,
+                steps,
+                dropped,
+                held,
+            });
         release(cx, self.directory, Resource::Mailbox(program));
         TaskPoll::Ready
     }
@@ -505,7 +509,14 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
                     final_refusal: true,
                 },
                 reasons,
-                draft: draft(pre.clone(), pre, Vec::new(), Vec::new(), admission, Vec::new()),
+                draft: draft(
+                    pre.clone(),
+                    pre,
+                    Vec::new(),
+                    Vec::new(),
+                    admission,
+                    Vec::new(),
+                ),
             };
         }
 
@@ -667,7 +678,14 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
         let a = self.attempt(cx, &input);
         let (disposition, still) = settle_pending(a.tried, attempts);
         Self::count(cx.resources, source, disposition);
-        self.record(cx.now_tick(), input.id, input.origin, source, a.draft, disposition);
+        self.record(
+            cx.now_tick(),
+            input.id,
+            input.origin,
+            source,
+            a.draft,
+            disposition,
+        );
         match still {
             Some(n) => {
                 cx.resources.wait(cx.id(), &a.reasons);

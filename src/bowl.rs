@@ -25,7 +25,9 @@ use ob_serve_a_bowl::{
 };
 
 use crate::observer::RuntimeObserver;
-use crate::trace::{ActionRecord, Admission, Delivery, Disposition, RuntimeEvent, RuntimeEventKind};
+use crate::trace::{
+    ActionRecord, Admission, Delivery, Disposition, RuntimeEvent, RuntimeEventKind,
+};
 
 /// Field-mask bit of a committed step's packets.
 pub const COMMITTED_BIT: u16 = 1 << 0;
@@ -120,7 +122,8 @@ impl BowlRuntimeObserver {
         self.published
     }
 
-    #[allow(clippy::cast_possible_truncation)]
+    // One packet: its key fields, then its payload fields, as the layout above lists them.
+    #[allow(clippy::cast_possible_truncation, clippy::too_many_arguments)]
     fn publish(
         &mut self,
         event: &RuntimeEvent,
@@ -168,33 +171,77 @@ impl RuntimeObserver for BowlRuntimeObserver {
             }
             RuntimeEventKind::Step(s) => {
                 let (slot, m) = (Some(s.program.0), Some(s.message.0));
-                self.publish(event, BowlPhase::Prepared, R::Manual, 0, slot, m, s.results.len());
+                self.publish(
+                    event,
+                    BowlPhase::Prepared,
+                    R::Manual,
+                    0,
+                    slot,
+                    m,
+                    s.results.len(),
+                );
                 match &s.admission {
                     Admission::Refused(reasons) => {
                         let held = if s.disposition.is_held() { HELD_BIT } else { 0 };
                         let mask = REFUSED_BIT | held;
-                        self.publish(event, BowlPhase::Refused, R::Manual, mask, slot, m, reasons.len());
+                        self.publish(
+                            event,
+                            BowlPhase::Refused,
+                            R::Manual,
+                            mask,
+                            slot,
+                            m,
+                            reasons.len(),
+                        );
                         match s.disposition {
                             d if d.is_held() => {
                                 self.publish(event, BowlPhase::Held, R::Manual, mask, slot, m, 1);
                             }
                             Disposition::BacklogFull { .. } | Disposition::Exhausted { .. } => {
-                                self.publish(event, BowlPhase::Dropped, R::Manual, REFUSED_BIT, slot, m, 1);
+                                self.publish(
+                                    event,
+                                    BowlPhase::Dropped,
+                                    R::Manual,
+                                    REFUSED_BIT,
+                                    slot,
+                                    m,
+                                    1,
+                                );
                             }
                             _ => {}
                         }
                     }
                     Admission::Admitted => {
                         let c = COMMITTED_BIT;
-                        self.publish(event, BowlPhase::Admitted, R::Manual, c, slot, m, s.effects.len());
-                        self.publish(event, BowlPhase::Committed, R::Manual, c, slot, m, s.results.len());
+                        self.publish(
+                            event,
+                            BowlPhase::Admitted,
+                            R::Manual,
+                            c,
+                            slot,
+                            m,
+                            s.effects.len(),
+                        );
+                        self.publish(
+                            event,
+                            BowlPhase::Committed,
+                            R::Manual,
+                            c,
+                            slot,
+                            m,
+                            s.results.len(),
+                        );
                         for a in &s.actions {
                             let (phase, reason, len) = match a {
                                 ActionRecord::Sent { deliveries, .. } => {
                                     (BowlPhase::Routed, R::Inbox, deliveries.len())
                                 }
-                                ActionRecord::TimerArmed { .. } => (BowlPhase::TimerArmed, R::Timer, 1),
-                                ActionRecord::ChildStarted { .. } => (BowlPhase::ChildStarted, R::Spawn, 1),
+                                ActionRecord::TimerArmed { .. } => {
+                                    (BowlPhase::TimerArmed, R::Timer, 1)
+                                }
+                                ActionRecord::ChildStarted { .. } => {
+                                    (BowlPhase::ChildStarted, R::Spawn, 1)
+                                }
                                 ActionRecord::ChildCancelRequested { .. } => {
                                     (BowlPhase::CancelRequested, R::Cancel, 1)
                                 }
@@ -207,28 +254,89 @@ impl RuntimeObserver for BowlRuntimeObserver {
                     }
                 }
             }
-            RuntimeEventKind::TimerFired { program, delivery, .. } => {
+            RuntimeEventKind::TimerFired {
+                program, delivery, ..
+            } => {
                 let (_, m) = delivered(delivery);
-                self.publish(event, BowlPhase::TimerFired, R::Timer, 0, Some(program.0), m, 1);
+                self.publish(
+                    event,
+                    BowlPhase::TimerFired,
+                    R::Timer,
+                    0,
+                    Some(program.0),
+                    m,
+                    1,
+                );
             }
-            RuntimeEventKind::TimerWaiting { program, message, .. } => {
+            RuntimeEventKind::TimerWaiting {
+                program, message, ..
+            } => {
                 let (slot, m) = (Some(program.0), Some(message.0));
-                self.publish(event, BowlPhase::TimerWaiting, R::Timer, HELD_BIT, slot, m, 1);
+                self.publish(
+                    event,
+                    BowlPhase::TimerWaiting,
+                    R::Timer,
+                    HELD_BIT,
+                    slot,
+                    m,
+                    1,
+                );
             }
-            RuntimeEventKind::ChildTick { program, delivery, .. } => {
+            RuntimeEventKind::ChildTick {
+                program, delivery, ..
+            } => {
                 let (_, m) = delivered(delivery);
-                self.publish(event, BowlPhase::ChildTick, R::Inbox, 0, Some(program.0), m, 1);
+                self.publish(
+                    event,
+                    BowlPhase::ChildTick,
+                    R::Inbox,
+                    0,
+                    Some(program.0),
+                    m,
+                    1,
+                );
             }
-            RuntimeEventKind::ChildEnded { program, cancelled, .. } => {
+            RuntimeEventKind::ChildEnded {
+                program, cancelled, ..
+            } => {
                 let reason = if *cancelled { R::Cancel } else { R::Manual };
-                self.publish(event, BowlPhase::ChildEnded, reason, 0, Some(program.0), None, 1);
+                self.publish(
+                    event,
+                    BowlPhase::ChildEnded,
+                    reason,
+                    0,
+                    Some(program.0),
+                    None,
+                    1,
+                );
             }
             RuntimeEventKind::Released { woken, .. } => {
-                self.publish(event, BowlPhase::Released, R::Resume, 0, None, None, woken.len());
+                self.publish(
+                    event,
+                    BowlPhase::Released,
+                    R::Resume,
+                    0,
+                    None,
+                    None,
+                    woken.len(),
+                );
             }
-            RuntimeEventKind::Finished { program, dropped, held, .. } => {
+            RuntimeEventKind::Finished {
+                program,
+                dropped,
+                held,
+                ..
+            } => {
                 let len = dropped.len() + held.len();
-                self.publish(event, BowlPhase::Finished, R::Shutdown, 0, Some(program.0), None, len);
+                self.publish(
+                    event,
+                    BowlPhase::Finished,
+                    R::Shutdown,
+                    0,
+                    Some(program.0),
+                    None,
+                    len,
+                );
             }
         }
     }

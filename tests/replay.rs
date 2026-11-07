@@ -4,12 +4,12 @@
 mod common;
 
 use big_bad_bool_runtime::fixtures::{
-    HIT, START, alarm, alarm_table, metronome, metronome_table, rally, rally_table,
-    signal_message, supervisor, supervisor_table, verified,
+    HIT, START, alarm, alarm_table, metronome, metronome_table, rally, rally_table, signal_message,
+    supervisor, supervisor_table, verified,
 };
 use big_bad_bool_runtime::{
-    ProgramInstance, Port, Route, RunDiff, Runtime, RuntimeConfig, RuntimeEventKind,
-    RuntimeLimits, SchedEvent, TraceLevel,
+    Port, ProgramInstance, Route, RunDiff, Runtime, RuntimeConfig, RuntimeEventKind, RuntimeLimits,
+    SchedEvent, TraceLevel,
 };
 use scope::{SchedulerConfig, Tick, WakeOrdering};
 
@@ -39,12 +39,13 @@ fn logical_timer_runs_repeat_exactly_under_every_policy_and_budget() {
     for ordering in WakeOrdering::ALL {
         for budget in BUDGETS {
             for policy in POLICIES {
-                let config = scheduler(SchedulerConfig::with_ordering(ordering).with_poll_budget(budget))
-                    .policy(policy)
-                    .limits(RuntimeLimits {
-                        steps: 60,
-                        ..RuntimeLimits::default()
-                    });
+                let config =
+                    scheduler(SchedulerConfig::with_ordering(ordering).with_poll_budget(budget))
+                        .policy(policy)
+                        .limits(RuntimeLimits {
+                            steps: 60,
+                            ..RuntimeLimits::default()
+                        });
                 let run = || {
                     let (x, y) = (id("x"), id("y"));
                     Runtime::builder(config)
@@ -67,7 +68,13 @@ fn logical_timer_runs_repeat_exactly_under_every_policy_and_budget() {
                 assert!(firing_ticks(&first).len() >= 3);
                 for _ in 0..4 {
                     let again = run();
-                    assert!(again.same_run(&first), "{} {budget} {}: {:?}", ordering.name(), policy.name(), again.diff(&first));
+                    assert!(
+                        again.same_run(&first),
+                        "{} {budget} {}: {:?}",
+                        ordering.name(),
+                        policy.name(),
+                        again.diff(&first)
+                    );
                     assert_eq!(wakes(&again), wakes(&first));
                     assert_eq!(firing_ticks(&again), firing_ticks(&first));
                     assert_eq!(
@@ -94,7 +101,8 @@ fn cancellation_is_deterministic_under_every_policy() {
     let p = verified(supervisor());
     for ordering in WakeOrdering::ALL {
         for budget in BUDGETS {
-            let config = scheduler(SchedulerConfig::with_ordering(ordering).with_poll_budget(budget));
+            let config =
+                scheduler(SchedulerConfig::with_ordering(ordering).with_poll_budget(budget));
             let run = || {
                 let (one, two) = (id("one"), id("two"));
                 Runtime::builder(config)
@@ -130,9 +138,17 @@ fn trace_off_changes_no_result() {
 fn a_different_run_reports_its_first_difference() {
     let p = verified(rally());
     let one = rally_pairs(&p, 2, RuntimeConfig::default());
-    let fifo = rally_pairs(&p, 2, RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(WakeOrdering::Lifo)));
+    let fifo = rally_pairs(
+        &p,
+        2,
+        RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(WakeOrdering::Lifo)),
+    );
     match one.diff(&fifo) {
-        Some(RunDiff::Event { index, left: Some(l), right: Some(r) }) => {
+        Some(RunDiff::Event {
+            index,
+            left: Some(l),
+            right: Some(r),
+        }) => {
             assert_eq!(one.log[..index], fifo.log[..index]);
             assert_ne!(l, r);
         }
@@ -143,6 +159,8 @@ fn a_different_run_reports_its_first_difference() {
     assert_eq!(one.diff(&one_again(&p)), None);
 }
 
-fn one_again(p: &big_bad_bool::program::VerifiedProgram) -> big_bad_bool_runtime::RunOutcome<big_bad_bool::program::NoObserver> {
+fn one_again(
+    p: &big_bad_bool::program::VerifiedProgram,
+) -> big_bad_bool_runtime::RunOutcome<big_bad_bool::program::NoObserver> {
     rally_pairs(p, 2, RuntimeConfig::default())
 }

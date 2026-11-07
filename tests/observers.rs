@@ -2,7 +2,9 @@
 
 mod common;
 
-use big_bad_bool_runtime::fixtures::{HIT, broadcaster, rally, rally_table, signal_message, sink, verified};
+use big_bad_bool_runtime::fixtures::{
+    HIT, broadcaster, rally, rally_table, signal_message, sink, verified,
+};
 use big_bad_bool_runtime::{
     AdmissionPolicy, EventCollector, Port, ProgramInstance, Route, Runtime, RuntimeConfig,
     RuntimeLimits, TraceLevel,
@@ -51,19 +53,30 @@ fn a_runtime_observer_sees_exactly_the_trace_and_changes_nothing() {
 fn an_observed_refusing_run_is_the_same_run() {
     let (caster, s) = (verified(broadcaster()), verified(sink()));
     for policy in common::POLICIES {
-        let config = RuntimeConfig::default().policy(policy).limits(RuntimeLimits {
-            mailbox: 2,
-            ..RuntimeLimits::default()
-        });
+        let config = RuntimeConfig::default()
+            .policy(policy)
+            .limits(RuntimeLimits {
+                mailbox: 2,
+                ..RuntimeLimits::default()
+            });
         let plain = casters(&caster, &s, config);
         let target = id("target");
         let mut b = Runtime::builder(config)
             .observer(EventCollector::default())
-            .program(target, ProgramInstance::new(&s, big_bad_bool_runtime::EffectTable::new()));
+            .program(
+                target,
+                ProgramInstance::new(&s, big_bad_bool_runtime::EffectTable::new()),
+            );
         for i in 0..4 {
             let c = id(&format!("caster {i}"));
             b = b
-                .program(c, ProgramInstance::new(&caster, big_bad_bool_runtime::fixtures::broadcaster_table()))
+                .program(
+                    c,
+                    ProgramInstance::new(
+                        &caster,
+                        big_bad_bool_runtime::fixtures::broadcaster_table(),
+                    ),
+                )
                 .route(Route::new(c, Port(0), target))
                 .inject(c, signal_message(big_bad_bool_runtime::fixtures::START))
                 .inject(c, signal_message(big_bad_bool_runtime::fixtures::START));

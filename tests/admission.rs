@@ -8,8 +8,8 @@ use big_bad_bool_runtime::fixtures::{
     two_timers_table, verified, volley,
 };
 use big_bad_bool_runtime::{
-    ActionRecord, Admission, AdmissionPolicy, BuildError, Delivery, Disposition, EffectTable,
-    Port, ProgramId, ProgramInstance, ProgramSlot, Route, Runtime, RuntimeConfig, RuntimeEffect,
+    ActionRecord, Admission, AdmissionPolicy, BuildError, Delivery, Disposition, EffectTable, Port,
+    ProgramId, ProgramInstance, ProgramSlot, Route, Runtime, RuntimeConfig, RuntimeEffect,
     RuntimeEventKind, RuntimeLimits, RuntimeRefusal,
 };
 
@@ -35,7 +35,10 @@ fn atomic_admission_several_actions_some_fit_alone_none_is_committed_nothing_is_
     let outcome = run(1);
     let step = outcome.steps_of(alarm_id).next().unwrap();
     assert_eq!(step.effects.len(), 4);
-    assert_eq!(refused(step), [RuntimeRefusal::TooManyTimers { needed: 2, free: 1 }]);
+    assert_eq!(
+        refused(step),
+        [RuntimeRefusal::TooManyTimers { needed: 2, free: 1 }]
+    );
     // Nothing committed: the digest is the start digest before and after, the phase is Idle.
     assert_eq!(step.pre, start_digest(&a));
     assert_eq!(step.post, step.pre);
@@ -45,7 +48,12 @@ fn atomic_admission_several_actions_some_fit_alone_none_is_committed_nothing_is_
     assert!(step.actions.is_empty());
     assert_eq!(outcome.program(sink_id).unwrap().steps, 0);
     assert!(outcome.steps_of(sink_id).next().is_none());
-    assert!(!outcome.log.iter().any(|e| matches!(e.kind, RuntimeEventKind::TimerFired { .. })));
+    assert!(
+        !outcome
+            .log
+            .iter()
+            .any(|e| matches!(e.kind, RuntimeEventKind::TimerFired { .. }))
+    );
     assert!(outcome.external.is_empty());
     assert_eq!(outcome.messages, 1);
     // One event for the whole decision.
@@ -63,7 +71,14 @@ fn atomic_admission_several_actions_some_fit_alone_none_is_committed_nothing_is_
             ActionRecord::External { tag: TAG_MIXED, .. }
         ]
     ));
-    assert_eq!(outcome.external.iter().filter(|e| e.tag == TAG_MIXED).count(), 1);
+    assert_eq!(
+        outcome
+            .external
+            .iter()
+            .filter(|e| e.tag == TAG_MIXED)
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -82,7 +97,10 @@ fn every_refusal_reason_is_collected_in_one_event() {
     assert_eq!(
         refused(s[0]),
         [
-            RuntimeRefusal::EffectsPerStep { observed: 17, permitted: 16 },
+            RuntimeRefusal::EffectsPerStep {
+                observed: 17,
+                permitted: 16
+            },
             RuntimeRefusal::NoRoute { port: Port(0) },
         ]
     );
@@ -100,7 +118,10 @@ fn bound_programs_routes_fanout_and_backlog_refuse_at_build() {
     let three = |config: RuntimeConfig| {
         let mut b = Runtime::builder(config);
         for i in 0..3 {
-            b = b.program(id(&format!("p{i}")), ProgramInstance::new(&p, EffectTable::new()));
+            b = b.program(
+                id(&format!("p{i}")),
+                ProgramInstance::new(&p, EffectTable::new()),
+            );
         }
         b.route(Route::new(id("p0"), Port(0), id("p1")))
             .route(Route::new(id("p0"), Port(0), id("p2")))
@@ -108,32 +129,61 @@ fn bound_programs_routes_fanout_and_backlog_refuse_at_build() {
     };
     assert_eq!(
         three(limits(|l| l.programs = 2)).build().err(),
-        Some(BuildError::TooManyPrograms { observed: 3, permitted: 2 })
+        Some(BuildError::TooManyPrograms {
+            observed: 3,
+            permitted: 2
+        })
     );
     assert_eq!(
         three(limits(|l| l.routes = 2)).build().err(),
-        Some(BuildError::TooManyRoutes { observed: 3, permitted: 2 })
+        Some(BuildError::TooManyRoutes {
+            observed: 3,
+            permitted: 2
+        })
     );
     assert_eq!(
         three(limits(|l| l.fanout = 1)).build().err(),
-        Some(BuildError::FanOut { from: id("p0"), port: Port(0), observed: 2, permitted: 1 })
+        Some(BuildError::FanOut {
+            from: id("p0"),
+            port: Port(0),
+            observed: 2,
+            permitted: 1
+        })
     );
     assert_eq!(
-        three(limits(|l| l.retry_backlog = 3).policy(AdmissionPolicy::retry(4))).build().err(),
-        Some(BuildError::Backlog { program: None, requested: 4, permitted: 3 })
+        three(limits(|l| l.retry_backlog = 3).policy(AdmissionPolicy::retry(4)))
+            .build()
+            .err(),
+        Some(BuildError::Backlog {
+            program: None,
+            requested: 4,
+            permitted: 3
+        })
     );
     let own = Runtime::builder(limits(|l| l.retry_backlog = 3))
-        .program(id("p0"), ProgramInstance::new(&p, EffectTable::new()).policy(AdmissionPolicy::retry(9)))
+        .program(
+            id("p0"),
+            ProgramInstance::new(&p, EffectTable::new()).policy(AdmissionPolicy::retry(9)),
+        )
         .build()
         .err();
-    assert_eq!(own, Some(BuildError::Backlog { program: Some(id("p0")), requested: 9, permitted: 3 }));
-    assert!(three(limits(|l| {
-        l.programs = 3;
-        l.routes = 3;
-        l.fanout = 2;
-    }))
-    .build()
-    .is_ok());
+    assert_eq!(
+        own,
+        Some(BuildError::Backlog {
+            program: Some(id("p0")),
+            requested: 9,
+            permitted: 3
+        })
+    );
+    assert!(
+        three(limits(|l| {
+            l.programs = 3;
+            l.routes = 3;
+            l.fanout = 2;
+        }))
+        .build()
+        .is_ok()
+    );
     let unknown = Runtime::builder(RuntimeConfig::default())
         .program(id("p0"), ProgramInstance::new(&p, EffectTable::new()))
         .inject(id("nobody"), signal_message(HIT))
@@ -167,10 +217,24 @@ fn bound_mailbox_refuses_injections_and_steps() {
     assert!(matches!(injected[0], Delivery::Delivered { .. }));
     assert!(matches!(
         injected[1],
-        Delivery::Refused { reason: RuntimeRefusal::MailboxFull { needed: 1, free: 0, .. }, .. }
+        Delivery::Refused {
+            reason: RuntimeRefusal::MailboxFull {
+                needed: 1,
+                free: 0,
+                ..
+            },
+            ..
+        }
     ));
     let first = outcome.steps_of(source).next().unwrap();
-    assert_eq!(refused(first), [RuntimeRefusal::MailboxFull { to: ProgramSlot(1), needed: 1, free: 0 }]);
+    assert_eq!(
+        refused(first),
+        [RuntimeRefusal::MailboxFull {
+            to: ProgramSlot(1),
+            needed: 1,
+            free: 0
+        }]
+    );
 }
 
 #[test]
@@ -192,7 +256,10 @@ fn bound_deliveries_per_step() {
     let refused_run = run(10);
     assert_eq!(
         refused(steps(&refused_run)[0]),
-        [RuntimeRefusal::FanOut { observed: 16, permitted: 10 }]
+        [RuntimeRefusal::FanOut {
+            observed: 16,
+            permitted: 10
+        }]
     );
     for t in &sinks {
         assert_eq!(refused_run.program(*t).unwrap().state.word(count), 0);
@@ -218,7 +285,13 @@ fn bound_effects_per_step() {
             .run()
     };
     let outcome = run(16);
-    assert_eq!(refused(steps(&outcome)[0]), [RuntimeRefusal::EffectsPerStep { observed: 17, permitted: 16 }]);
+    assert_eq!(
+        refused(steps(&outcome)[0]),
+        [RuntimeRefusal::EffectsPerStep {
+            observed: 17,
+            permitted: 16
+        }]
+    );
     assert_eq!(outcome.program(a).unwrap().digest, start_digest(&p));
     assert_eq!(outcome.program(b).unwrap().steps, 0);
     assert_eq!(steps(&run(17))[0].admission, Admission::Admitted);
@@ -238,11 +311,17 @@ fn bound_timers() {
             .run()
     };
     let one = run(1);
-    assert_eq!(refused(steps(&one)[0]), [RuntimeRefusal::TooManyTimers { needed: 2, free: 1 }]);
+    assert_eq!(
+        refused(steps(&one)[0]),
+        [RuntimeRefusal::TooManyTimers { needed: 2, free: 1 }]
+    );
     assert_eq!(one.program(alarm_id).unwrap().state.word(phase), 0);
     let two = run(2);
     assert_eq!(
-        two.log.iter().filter(|e| matches!(e.kind, RuntimeEventKind::TimerFired { .. })).count(),
+        two.log
+            .iter()
+            .filter(|e| matches!(e.kind, RuntimeEventKind::TimerFired { .. }))
+            .count(),
         2
     );
     assert_eq!(two.program(alarm_id).unwrap().state.word(phase), 2);
@@ -258,7 +337,10 @@ fn bound_children() {
         .build()
         .unwrap()
         .run();
-    assert_eq!(refused(steps(&outcome)[0]), [RuntimeRefusal::TooManyChildren { needed: 1, free: 0 }]);
+    assert_eq!(
+        refused(steps(&outcome)[0]),
+        [RuntimeRefusal::TooManyChildren { needed: 1, free: 0 }]
+    );
     assert_eq!(outcome.program(sup).unwrap().digest, start_digest(&p));
 }
 
@@ -277,18 +359,30 @@ fn bound_steps_ends_an_endless_volley() {
         .run();
     assert_eq!(outcome.steps, 50);
     let last = steps(&outcome).into_iter().last().unwrap();
-    assert_eq!(refused(last), [RuntimeRefusal::StepBudget { permitted: 50 }]);
-    assert_eq!(last.disposition, Disposition::Consumed { final_refusal: true });
+    assert_eq!(
+        refused(last),
+        [RuntimeRefusal::StepBudget { permitted: 50 }]
+    );
+    assert_eq!(
+        last.disposition,
+        Disposition::Consumed {
+            final_refusal: true
+        }
+    );
 }
 
 #[test]
 fn bound_trace_events_drops_the_oldest_and_keeps_numbers() {
     let p = verified(rally());
     let full = common::rally_pairs(&p, 2, RuntimeConfig::default());
-    let kept = common::rally_pairs(&p, 2, RuntimeConfig::default().limits(RuntimeLimits {
-        trace_events: 10,
-        ..RuntimeLimits::default()
-    }));
+    let kept = common::rally_pairs(
+        &p,
+        2,
+        RuntimeConfig::default().limits(RuntimeLimits {
+            trace_events: 10,
+            ..RuntimeLimits::default()
+        }),
+    );
     assert_eq!(kept.log.len(), 10);
     assert_eq!(kept.events, full.events);
     assert_eq!(kept.trace_dropped, full.events - 10);
@@ -315,7 +409,10 @@ fn a_finished_receiver_refuses_the_step_that_would_send_to_it() {
         .run();
     assert!(outcome.program(target).unwrap().halted);
     let hub_step = outcome.steps_of(hub).next().unwrap();
-    assert_eq!(refused(hub_step), [RuntimeRefusal::TargetFinished { to: ProgramSlot(0) }]);
+    assert_eq!(
+        refused(hub_step),
+        [RuntimeRefusal::TargetFinished { to: ProgramSlot(0) }]
+    );
     assert_eq!(outcome.program(hub).unwrap().digest, start_digest(&caster));
 }
 
@@ -323,7 +420,13 @@ fn a_finished_receiver_refuses_the_step_that_would_send_to_it() {
 fn an_effect_table_must_fit_its_program() {
     let p = verified(sink());
     let err = Runtime::builder(RuntimeConfig::default())
-        .program(id("s"), ProgramInstance::new(&p, EffectTable::new().on("count", 1, [RuntimeEffect::Trace { tag: 0 }])))
+        .program(
+            id("s"),
+            ProgramInstance::new(
+                &p,
+                EffectTable::new().on("count", 1, [RuntimeEffect::Trace { tag: 0 }]),
+            ),
+        )
         .build()
         .err();
     assert_eq!(

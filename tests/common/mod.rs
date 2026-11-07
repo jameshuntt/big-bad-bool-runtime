@@ -3,13 +3,11 @@
 #![allow(dead_code)]
 
 use big_bad_bool::program::{NoObserver, Observation, Stepper, VerifiedProgram};
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, broadcaster_table, rally_table, signal_message,
-};
+use big_bad_bool_runtime::fixtures::{HIT, START, broadcaster_table, rally_table, signal_message};
 use big_bad_bool_runtime::{
     Admission, AdmissionPolicy, EffectTable, Port, ProgramId, ProgramInstance, Route, RunOutcome,
-    Runtime, RuntimeConfig, RuntimeLimits, RuntimeMessage, RuntimeRefusal, StateDigest,
-    StepRecord, state_digest,
+    Runtime, RuntimeConfig, RuntimeLimits, RuntimeMessage, RuntimeRefusal, StateDigest, StepRecord,
+    state_digest,
 };
 use scope::{SchedulerConfig, WakeOrdering};
 
@@ -44,7 +42,11 @@ pub fn pair_ids(pair: u32) -> (ProgramId, ProgramId) {
 }
 
 /// `pairs` rally pairs, each served once.
-pub fn rally_pairs(program: &VerifiedProgram, pairs: u32, config: RuntimeConfig) -> RunOutcome<NoObserver> {
+pub fn rally_pairs(
+    program: &VerifiedProgram,
+    pairs: u32,
+    config: RuntimeConfig,
+) -> RunOutcome<NoObserver> {
     let mut b = Runtime::builder(config);
     for pair in 0..pairs {
         let (x, y) = pair_ids(pair);
@@ -65,7 +67,8 @@ pub fn casters(
     config: RuntimeConfig,
 ) -> RunOutcome<NoObserver> {
     let target = id("target");
-    let mut b = Runtime::builder(config).program(target, ProgramInstance::new(sink, EffectTable::new()));
+    let mut b =
+        Runtime::builder(config).program(target, ProgramInstance::new(sink, EffectTable::new()));
     for i in 0..4 {
         let c = id(&format!("caster {i}"));
         b = b

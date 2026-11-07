@@ -3,21 +3,23 @@
 
 mod common;
 
-use scope::{SchedulerConfig, TaskState, Tick, WakeOrdering, WakeReason};
 use big_bad_bool_runtime::fixtures::{
     ALARM_TICKS, HIT, START, TAG_RALLY_DONE, TAG_RING, TICKER_TICKS, alarm, alarm_table,
     broadcaster, broadcaster_table, rally, rally_table, signal_message, sink, supervisor,
     supervisor_table, verified,
 };
 use big_bad_bool_runtime::{
-    ActionRecord, Admission, BuildError, ChildKey, Delivery, EffectTable, Origin, Port,
-    PROGRAM_NAMESPACE, ProgramId, ProgramInstance, ProgramSlot, ROUTE_NAMESPACE, RouteId, RunId,
-    Route, Runtime, RuntimeConfig, RuntimeEffect, RuntimeEventKind, RuntimeLimits, RuntimeMessage,
-    SchedEvent, TimerId,
+    ActionRecord, Admission, BuildError, ChildKey, Delivery, EffectTable, Origin,
+    PROGRAM_NAMESPACE, Port, ProgramId, ProgramInstance, ProgramSlot, ROUTE_NAMESPACE, Route,
+    RouteId, RunId, Runtime, RuntimeConfig, RuntimeEffect, RuntimeEventKind, RuntimeLimits,
+    RuntimeMessage, SchedEvent, TimerId,
 };
+use scope::{SchedulerConfig, TaskState, Tick, WakeOrdering, WakeReason};
 use uuid_macros::uuid::Uuid;
 
-use common::{BUDGETS, POLICIES, casters, id, rally_pairs, scheduler, standalone, start_digest, steps};
+use common::{
+    BUDGETS, POLICIES, casters, id, rally_pairs, scheduler, standalone, start_digest, steps,
+};
 
 #[test]
 fn ping_pong_alternates_and_keeps_states_apart() {
@@ -33,7 +35,10 @@ fn ping_pong_alternates_and_keeps_states_apart() {
     assert_eq!(order, [sa, sb, sa, sb, sa, sb, sa, sb, sa]);
     assert!(s.iter().all(|r| r.admission == Admission::Admitted));
     assert_ne!(s[0].pre, s[0].post);
-    assert_eq!(s[1].pre, start, "B is still at its start state after A's first commit");
+    assert_eq!(
+        s[1].pre, start,
+        "B is still at its start state after A's first commit"
+    );
     for pair in s.windows(2) {
         let sent: Vec<_> = pair[0]
             .actions
@@ -64,7 +69,13 @@ fn ping_pong_alternates_and_keeps_states_apart() {
     assert_eq!(fa.digest, standalone(&program, &hits(5)));
     assert_eq!(fb.digest, standalone(&program, &hits(4)));
     // Every event is numbered in order, with no gap.
-    assert!(outcome.log.iter().enumerate().all(|(i, e)| e.seq == i as u64));
+    assert!(
+        outcome
+            .log
+            .iter()
+            .enumerate()
+            .all(|(i, e)| e.seq == i as u64)
+    );
     assert_eq!(outcome.events, outcome.log.len() as u64);
 }
 
@@ -74,9 +85,12 @@ fn fan_out_follows_route_order_within_its_bound() {
     let sink_program = verified(sink());
     let count = sink_program.spec().dimension_id("count").unwrap();
     let hub = id("hub");
-    let sinks: Vec<ProgramId> = [5, 2, 8, 1, 7, 3, 6, 4].map(|n| id(&format!("sink {n}"))).to_vec();
+    let sinks: Vec<ProgramId> = [5, 2, 8, 1, 7, 3, 6, 4]
+        .map(|n| id(&format!("sink {n}")))
+        .to_vec();
     let build = |config: RuntimeConfig, sinks: &[ProgramId]| {
-        let mut b = Runtime::builder(config).program(hub, ProgramInstance::new(&caster, broadcaster_table()));
+        let mut b = Runtime::builder(config)
+            .program(hub, ProgramInstance::new(&caster, broadcaster_table()));
         for s in sinks {
             b = b
                 .program(*s, ProgramInstance::new(&sink_program, EffectTable::new()))
@@ -88,7 +102,9 @@ fn fan_out_follows_route_order_within_its_bound() {
         let config = RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(ordering));
         let outcome = build(config, &sinks).unwrap().run();
         let first = steps(&outcome)[0];
-        let [ActionRecord::Sent { deliveries, .. }] = first.actions.as_slice() else { panic!() };
+        let [ActionRecord::Sent { deliveries, .. }] = first.actions.as_slice() else {
+            panic!()
+        };
         let to: Vec<ProgramId> = deliveries
             .iter()
             .map(|d| match d {
@@ -135,13 +151,23 @@ fn a_logical_timer_fires_at_its_tick_and_repeats_exactly() {
     let outcome = run();
     let s = steps(&outcome);
     assert_eq!(s.len(), 2);
-    let ActionRecord::TimerArmed { timer, message, after } = s[0].actions[0] else {
+    let ActionRecord::TimerArmed {
+        timer,
+        message,
+        after,
+    } = s[0].actions[0]
+    else {
         panic!("{:?}", s[0].actions)
     };
     assert_eq!(after, ALARM_TICKS.0);
     // The timer task is spawned after the arming poll and arms Scope's tick timer on its own
     // first poll, one round later; it fires ALARM_TICKS rounds after that.
-    let armed = outcome.log.iter().find(|e| e.step().is_some()).unwrap().tick;
+    let armed = outcome
+        .log
+        .iter()
+        .find(|e| e.step().is_some())
+        .unwrap()
+        .tick;
     let fired = Tick(armed.0 + 1 + ALARM_TICKS.0);
     let fired_event = outcome
         .log
@@ -154,16 +180,39 @@ fn a_logical_timer_fires_at_its_tick_and_repeats_exactly() {
         RuntimeEventKind::TimerFired {
             program: ProgramSlot(0),
             timer,
-            delivery: Delivery::Delivered { to: ProgramSlot(0), message }
+            delivery: Delivery::Delivered {
+                to: ProgramSlot(0),
+                message
+            }
         }
     );
     assert_eq!(s[1].message, message);
     assert_eq!(s[1].origin, Origin::Timer(ProgramSlot(0), timer));
     assert_eq!(timer, TimerId::of(alarm_id, 0));
-    assert_eq!(s[1].actions, [ActionRecord::External { tag: TAG_RING, word: 4 }]);
-    assert_eq!(outcome.program(alarm_id).unwrap().state.word(phase), 2, "Done");
-    assert!(outcome.scheduler.iter().any(|e| matches!(e, SchedEvent::TickTimer(_, t) if *t == fired)));
-    assert!(outcome.scheduler.iter().any(|e| matches!(e, SchedEvent::Wake(_, WakeReason::Timer))));
+    assert_eq!(
+        s[1].actions,
+        [ActionRecord::External {
+            tag: TAG_RING,
+            word: 4
+        }]
+    );
+    assert_eq!(
+        outcome.program(alarm_id).unwrap().state.word(phase),
+        2,
+        "Done"
+    );
+    assert!(
+        outcome
+            .scheduler
+            .iter()
+            .any(|e| matches!(e, SchedEvent::TickTimer(_, t) if *t == fired))
+    );
+    assert!(
+        outcome
+            .scheduler
+            .iter()
+            .any(|e| matches!(e, SchedEvent::Wake(_, WakeReason::Timer)))
+    );
     // Identical ticks and trace over repeats.
     for _ in 0..10 {
         let again = run();
@@ -192,9 +241,12 @@ fn a_committed_effect_cancels_a_scoped_child() {
     let cancel = steps(&outcome)
         .into_iter()
         .find_map(|s| match s.actions.as_slice() {
-            [ActionRecord::ChildCancelRequested { key, task: Some(task) }] => {
-                Some((*key, *task, s.post.clone(), s.pre.clone()))
-            }
+            [
+                ActionRecord::ChildCancelRequested {
+                    key,
+                    task: Some(task),
+                },
+            ] => Some((*key, *task, s.post.clone(), s.pre.clone())),
             _ => None,
         })
         .expect("tick-3 cancels the child");
@@ -244,7 +296,12 @@ fn contention_is_deterministic_under_every_scope_policy_budget_and_admission_pol
             assert_eq!((first.steps, first.refused), (16 * 9, 0));
             for _ in 0..4 {
                 let again = rally_pairs(&program, 16, scheduler(sched));
-                assert!(again.same_run(&first), "{} budget {budget}: {:?}", ordering.name(), again.diff(&first));
+                assert!(
+                    again.same_run(&first),
+                    "{} budget {budget}: {:?}",
+                    ordering.name(),
+                    again.diff(&first)
+                );
             }
             finals.push(first.final_digests());
             logs.push(first.log);
@@ -254,7 +311,12 @@ fn contention_is_deterministic_under_every_scope_policy_budget_and_admission_pol
                     ..RuntimeLimits::default()
                 });
                 let first = casters(&caster, &s, config);
-                assert!(first.refused > 0, "{} {budget} {}", ordering.name(), policy.name());
+                assert!(
+                    first.refused > 0,
+                    "{} {budget} {}",
+                    ordering.name(),
+                    policy.name()
+                );
                 for _ in 0..4 {
                     let again = casters(&caster, &s, config);
                     assert!(
@@ -270,7 +332,11 @@ fn contention_is_deterministic_under_every_scope_policy_budget_and_admission_pol
     }
     // Program states do not depend on the scheduler; the interleaving does.
     assert!(finals.windows(2).all(|w| w[0] == w[1]));
-    let distinct = logs.iter().enumerate().filter(|(i, l)| logs[..*i].iter().all(|m| m != *l)).count();
+    let distinct = logs
+        .iter()
+        .enumerate()
+        .filter(|(i, l)| logs[..*i].iter().all(|m| m != *l))
+        .count();
     assert!(distinct > 1, "{distinct}");
 }
 
@@ -296,7 +362,10 @@ fn isolation_programs_reach_only_messages() {
         .run();
     let (fa, fb) = (outcome.program(a).unwrap(), outcome.program(b).unwrap());
     assert_ne!(fa.digest, fb.digest);
-    assert_eq!(fa.digest, standalone(&program, &vec![signal_message(HIT); 3]));
+    assert_eq!(
+        fa.digest,
+        standalone(&program, &vec![signal_message(HIT); 3])
+    );
     assert_eq!(fb.digest, standalone(&program, &[signal_message(HIT)]));
 }
 
@@ -324,7 +393,13 @@ fn uuid_topology_same_names_same_ids_and_slots_stay_internal() {
     let ns = |kind: &str| Uuid::new_v5(&Uuid::NAMESPACE_OID, kind.as_bytes());
     assert_eq!(ping.0, Uuid::new_v5(&ns(PROGRAM_NAMESPACE), b"ping"));
     let route = RouteId::of(ping, Port(0), id("pong"));
-    assert_eq!(route.0, Uuid::new_v5(&ns(ROUTE_NAMESPACE), format!("{ping}/0/{}", id("pong")).as_bytes()));
+    assert_eq!(
+        route.0,
+        Uuid::new_v5(
+            &ns(ROUTE_NAMESPACE),
+            format!("{ping}/0/{}", id("pong")).as_bytes()
+        )
+    );
     assert_eq!(route, one.route_ids()[0]);
     // Kinds never share a namespace: the same name gives four different ids, and none is the
     // OID-namespace `named` id.
@@ -362,7 +437,10 @@ fn uuid_topology_same_names_same_ids_and_slots_stay_internal() {
     assert_eq!(r1.slot(ping), Some(ProgramSlot(0)));
     assert_eq!(swapped.slot(ping), Some(ProgramSlot(1)));
     for name in ["ping", "pong"] {
-        assert_eq!(r1.program(id(name)).unwrap().digest, swapped.program(id(name)).unwrap().digest);
+        assert_eq!(
+            r1.program(id(name)).unwrap().digest,
+            swapped.program(id(name)).unwrap().digest
+        );
     }
     assert_eq!(r1.external.len(), swapped.external.len());
     // Another program under the same names: another run id.

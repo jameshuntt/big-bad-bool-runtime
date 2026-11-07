@@ -5,7 +5,9 @@
 
 mod common;
 
-use big_bad_bool::program::ob_serve_a_bowl::{ObservableWakeRuntime, ObserverConfig, WakeProfileCode};
+use big_bad_bool::program::ob_serve_a_bowl::{
+    ObservableWakeRuntime, ObserverConfig, WakeProfileCode,
+};
 use big_bad_bool::program::{BowlObserver, NoObserver};
 use big_bad_bool_runtime::fixtures::{
     HIT, START, broadcaster, broadcaster_table, rally, rally_table, signal_message, sink, verified,
@@ -31,8 +33,14 @@ fn bowl_on_and_off_is_the_same_run() {
     let plain = common::rally_pairs(&p, 1, RuntimeConfig::default());
     let observed = Runtime::builder(RuntimeConfig::default())
         .observer(BowlRuntimeObserver::new(bowl_runtime()))
-        .program(a, ProgramInstance::new(&p, rally_table()).observer(BowlObserver::new(bowl_runtime())))
-        .program(b, ProgramInstance::new(&p, rally_table()).observer(BowlObserver::new(bowl_runtime())))
+        .program(
+            a,
+            ProgramInstance::new(&p, rally_table()).observer(BowlObserver::new(bowl_runtime())),
+        )
+        .program(
+            b,
+            ProgramInstance::new(&p, rally_table()).observer(BowlObserver::new(bowl_runtime())),
+        )
         .route(Route::new(a, Port(0), b))
         .route(Route::new(b, Port(0), a))
         .inject(a, signal_message(HIT))
@@ -51,7 +59,10 @@ fn bowl_on_and_off_is_the_same_run() {
     let mut runtime_observer = observed.observer;
     let delivered = runtime_observer.runtime_mut().drain_inline();
     assert_eq!(delivered.len(), runtime_observer.published());
-    let committed = delivered.iter().filter(|e| e.key.phase() == BowlPhase::Committed as u64).count();
+    let committed = delivered
+        .iter()
+        .filter(|e| e.key.phase() == BowlPhase::Committed as u64)
+        .count();
     assert_eq!(committed as u64, plain.steps);
 }
 
@@ -60,16 +71,25 @@ fn a_refused_step_never_looks_like_a_commit() {
     let (caster, s) = (verified(broadcaster()), verified(sink()));
     let (source, target) = (id("source"), id("target"));
     for policy in common::POLICIES {
-        let config = RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(WakeOrdering::Fifo))
-            .policy(policy)
-            .limits(RuntimeLimits {
-                mailbox: 1,
-                ..RuntimeLimits::default()
-            });
+        let config =
+            RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(WakeOrdering::Fifo))
+                .policy(policy)
+                .limits(RuntimeLimits {
+                    mailbox: 1,
+                    ..RuntimeLimits::default()
+                });
         let outcome = Runtime::builder(config)
             .observer(BowlRuntimeObserver::new(bowl_runtime()))
-            .program(source, ProgramInstance::new(&caster, broadcaster_table()).observer(BowlObserver::new(bowl_runtime())))
-            .program(target, ProgramInstance::new(&s, EffectTable::new()).observer(BowlObserver::new(bowl_runtime())))
+            .program(
+                source,
+                ProgramInstance::new(&caster, broadcaster_table())
+                    .observer(BowlObserver::new(bowl_runtime())),
+            )
+            .program(
+                target,
+                ProgramInstance::new(&s, EffectTable::new())
+                    .observer(BowlObserver::new(bowl_runtime())),
+            )
             .route(Route::new(source, Port(0), target))
             .inject(target, signal_message(HIT))
             .inject(source, signal_message(START))
@@ -109,6 +129,14 @@ fn a_refused_step_never_looks_like_a_commit() {
     }
 }
 
-fn refused_step_seq<O, W>(outcome: &big_bad_bool_runtime::RunOutcome<O, W>, step: &big_bad_bool_runtime::StepRecord) -> u64 {
-    outcome.log.iter().find(|e| e.step() == Some(step)).unwrap().seq
+fn refused_step_seq<O, W>(
+    outcome: &big_bad_bool_runtime::RunOutcome<O, W>,
+    step: &big_bad_bool_runtime::StepRecord,
+) -> u64 {
+    outcome
+        .log
+        .iter()
+        .find(|e| e.step() == Some(step))
+        .unwrap()
+        .seq
 }

@@ -2,12 +2,14 @@
 //!
 //! `cargo run --example fan_out`
 
-use big_bad_bool_runtime::fixtures::{
-    START, broadcaster, broadcaster_table, signal_message, sink, verified,
-};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{
     ActionRecord, EffectTable, Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig,
 };
+use fixtures::{START, broadcaster, broadcaster_table, signal_message, sink, verified};
 
 fn main() {
     let (caster, s) = (verified(broadcaster()), verified(sink()));

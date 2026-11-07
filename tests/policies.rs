@@ -2,14 +2,14 @@
 
 mod common;
 
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, alarm, broadcaster, broadcaster_table, rally_table, signal_message, sink,
-    stalled_table, two_timers_table, verified, volley,
-};
 use big_bad_bool_runtime::{
     ActionRecord, Admission, AdmissionPolicy, Delivery, Disposition, EffectTable, InputSource,
     Origin, Port, ProgramInstance, ProgramSlot, Resource, Route, Runtime, RuntimeEventKind,
     RuntimeRefusal, StepRecord,
+};
+use common::fixtures::{
+    HIT, START, alarm, broadcaster, broadcaster_table, rally_table, signal_message, sink,
+    stalled_table, two_timers_table, verified, volley,
 };
 use scope::{SchedulerConfig, WakeOrdering};
 

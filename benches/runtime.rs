@@ -8,15 +8,19 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use big_bad_bool::program::{NoObserver, Observation, Stepper, VerifiedProgram};
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, broadcaster, broadcaster_table, metronome, metronome_table, rally, rally_table,
-    signal_message, sink, verified, volley,
-};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{
     AdmissionPolicy, EffectTable, Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig,
     RuntimeLimits, TraceLevel,
 };
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use fixtures::{
+    HIT, START, broadcaster, broadcaster_table, metronome, metronome_table, rally, rally_table,
+    signal_message, sink, verified, volley,
+};
 use scope::{
     BoundedMailbox, BoundedSender, Cx, Mailbox, MailboxSender, Scope, ScopedTask, TaskPoll,
 };

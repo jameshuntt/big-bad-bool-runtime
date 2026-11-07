@@ -2,15 +2,15 @@
 
 mod common;
 
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, TAG_MIXED, alarm, broadcaster, broadcaster_table, flood_table, mixed_table, rally,
-    rally_table, signal_message, sink, strict_sink, supervisor, supervisor_table, twice_table,
-    two_timers_table, verified, volley,
-};
 use big_bad_bool_runtime::{
     ActionRecord, Admission, AdmissionPolicy, BuildError, Delivery, Disposition, EffectTable, Port,
     ProgramId, ProgramInstance, ProgramSlot, Route, Runtime, RuntimeConfig, RuntimeEffect,
     RuntimeEventKind, RuntimeLimits, RuntimeRefusal,
+};
+use common::fixtures::{
+    HIT, START, TAG_MIXED, alarm, broadcaster, broadcaster_table, flood_table, mixed_table, rally,
+    rally_table, signal_message, sink, strict_sink, supervisor, supervisor_table, twice_table,
+    two_timers_table, verified, volley,
 };
 
 use common::{fifo, id, refused, start_digest, steps};

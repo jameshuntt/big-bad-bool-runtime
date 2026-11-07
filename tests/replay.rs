@@ -3,13 +3,13 @@
 
 mod common;
 
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, alarm, alarm_table, metronome, metronome_table, rally, rally_table, signal_message,
-    supervisor, supervisor_table, verified,
-};
 use big_bad_bool_runtime::{
     Port, ProgramInstance, Route, RunDiff, Runtime, RuntimeConfig, RuntimeEventKind, RuntimeLimits,
     SchedEvent, TraceLevel,
+};
+use common::fixtures::{
+    HIT, START, alarm, alarm_table, metronome, metronome_table, rally, rally_table, signal_message,
+    supervisor, supervisor_table, verified,
 };
 use scope::{SchedulerConfig, Tick, WakeOrdering};
 

@@ -2,10 +2,14 @@
 //!
 //! `cargo run --example ping_pong`
 
-use big_bad_bool_runtime::fixtures::{HIT, rally, rally_table, signal_message, verified};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{
     ActionRecord, Delivery, Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig,
 };
+use fixtures::{HIT, rally, rally_table, signal_message, verified};
 
 fn main() {
     let rally = verified(rally());

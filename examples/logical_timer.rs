@@ -2,8 +2,12 @@
 //!
 //! `cargo run --example logical_timer`
 
-use big_bad_bool_runtime::fixtures::{START, alarm, alarm_table, signal_message, verified};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{ProgramId, ProgramInstance, Runtime, RuntimeConfig, RuntimeEventKind};
+use fixtures::{START, alarm, alarm_table, signal_message, verified};
 
 fn main() {
     let p = verified(alarm());

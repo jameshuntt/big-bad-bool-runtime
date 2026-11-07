@@ -2,13 +2,15 @@
 
 #![allow(dead_code)]
 
+pub mod fixtures;
+
 use big_bad_bool::program::{NoObserver, Observation, Stepper, VerifiedProgram};
-use big_bad_bool_runtime::fixtures::{HIT, START, broadcaster_table, rally_table, signal_message};
 use big_bad_bool_runtime::{
     Admission, AdmissionPolicy, EffectTable, Port, ProgramId, ProgramInstance, Route, RunOutcome,
     Runtime, RuntimeConfig, RuntimeLimits, RuntimeMessage, RuntimeRefusal, StateDigest, StepRecord,
     state_digest,
 };
+use fixtures::{HIT, START, broadcaster_table, rally_table, signal_message};
 use scope::{SchedulerConfig, WakeOrdering};
 
 /// Steps `program` alone, with no runtime, over `inputs` at positions 0, 1, ...

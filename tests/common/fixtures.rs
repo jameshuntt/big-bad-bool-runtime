@@ -1,9 +1,10 @@
-//! Small verified programs the tests, examples, benches and docs run. Test data, not runtime:
-//! nothing in the runtime uses this module.
-//!
-//! Every program reads one evidence dimension `signal`, keeps one state dimension, and most
-//! emit one effect dimension `out`. Each `*_table` function is a program's
-//! [`EffectTable`]: data, one rule per effect word.
+// Small verified programs the tests, examples, benches and docs run. Test data, not part of
+// the crate: tests reach it as `common::fixtures`, examples and benches with
+// `#[path = "../tests/common/fixtures.rs"]`, doctests with `include!`.
+//
+// Every program reads one evidence dimension `signal`, keeps one state dimension, and most
+// emit one effect dimension `out`. Each `*_table` function is a program's `EffectTable`:
+// data, one rule per effect word.
 
 use big_bad_bool::program::{
     Clause, ContainmentSpec, ContractSpec, FieldMatcher, Program, ProgramBuilder, ProgramSpec,
@@ -11,9 +12,7 @@ use big_bad_bool::program::{
 };
 use scope::TickDelta;
 
-use crate::effect::{ChildSpec, EffectTable, RuntimeEffect};
-use crate::ids::{ChildKey, Port};
-use crate::message::RuntimeMessage;
+use big_bad_bool_runtime::{ChildKey, ChildSpec, EffectTable, Port, RuntimeEffect, RuntimeMessage};
 
 /// The `#[bitpack]` word types of the fixtures. The derive generates their constants and
 /// accessors, which carry no docs of their own.
@@ -210,7 +209,7 @@ pub fn rally_table() -> EffectTable {
 }
 
 /// A rally's table with 16 trace marks added to every `Hit`: 17 effects, one past
-/// [`MAX_EFFECTS_PER_STEP`](crate::MAX_EFFECTS_PER_STEP).
+/// [`MAX_EFFECTS_PER_STEP`](big_bad_bool_runtime::MAX_EFFECTS_PER_STEP).
 #[must_use]
 pub fn flood_table() -> EffectTable {
     let hit = std::iter::once(send_hit()).chain((0..16).map(|tag| RuntimeEffect::Trace { tag }));

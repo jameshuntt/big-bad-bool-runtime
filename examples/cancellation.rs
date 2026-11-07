@@ -2,10 +2,12 @@
 //!
 //! `cargo run --example cancellation`
 
-use big_bad_bool_runtime::fixtures::{
-    START, signal_message, supervisor, supervisor_table, verified,
-};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{ProgramId, ProgramInstance, Runtime, RuntimeConfig, RuntimeEventKind};
+use fixtures::{START, signal_message, supervisor, supervisor_table, verified};
 
 fn main() {
     let p = verified(supervisor());

@@ -3,13 +3,15 @@
 //!
 //! `cargo run --example mailbox_full`
 
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, broadcaster, broadcaster_table, signal_message, sink, verified,
-};
+#[allow(dead_code)]
+#[path = "../tests/common/fixtures.rs"]
+mod fixtures;
+
 use big_bad_bool_runtime::{
     EffectTable, Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig, RuntimeEventKind,
     RuntimeLimits,
 };
+use fixtures::{HIT, START, broadcaster, broadcaster_table, signal_message, sink, verified};
 use scope::{SchedulerConfig, WakeOrdering};
 
 fn main() {

@@ -2,13 +2,11 @@
 
 mod common;
 
-use big_bad_bool_runtime::fixtures::{
-    HIT, broadcaster, rally, rally_table, signal_message, sink, verified,
-};
 use big_bad_bool_runtime::{
     AdmissionPolicy, EventCollector, Port, ProgramInstance, Route, Runtime, RuntimeConfig,
     RuntimeLimits, TraceLevel,
 };
+use common::fixtures::{HIT, broadcaster, rally, rally_table, signal_message, sink, verified};
 
 use common::{casters, id, rally_pairs};
 
@@ -72,14 +70,11 @@ fn an_observed_refusing_run_is_the_same_run() {
             b = b
                 .program(
                     c,
-                    ProgramInstance::new(
-                        &caster,
-                        big_bad_bool_runtime::fixtures::broadcaster_table(),
-                    ),
+                    ProgramInstance::new(&caster, common::fixtures::broadcaster_table()),
                 )
                 .route(Route::new(c, Port(0), target))
-                .inject(c, signal_message(big_bad_bool_runtime::fixtures::START))
-                .inject(c, signal_message(big_bad_bool_runtime::fixtures::START));
+                .inject(c, signal_message(common::fixtures::START))
+                .inject(c, signal_message(common::fixtures::START));
         }
         let watched = b.build().unwrap().run();
         assert!(plain.refused > 0);

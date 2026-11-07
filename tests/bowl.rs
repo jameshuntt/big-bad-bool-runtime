@@ -9,12 +9,12 @@ use big_bad_bool::program::ob_serve_a_bowl::{
     ObservableWakeRuntime, ObserverConfig, WakeProfileCode,
 };
 use big_bad_bool::program::{BowlObserver, NoObserver};
-use big_bad_bool_runtime::fixtures::{
-    HIT, START, broadcaster, broadcaster_table, rally, rally_table, signal_message, sink, verified,
-};
 use big_bad_bool_runtime::{
     AdmissionPolicy, BowlPhase, BowlRuntimeObserver, COMMITTED_BIT, EffectTable, Port,
     ProgramInstance, REFUSED_BIT, Route, Runtime, RuntimeConfig, RuntimeLimits,
+};
+use common::fixtures::{
+    HIT, START, broadcaster, broadcaster_table, rally, rally_table, signal_message, sink, verified,
 };
 use scope::{SchedulerConfig, WakeOrdering};
 

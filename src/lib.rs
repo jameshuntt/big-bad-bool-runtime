@@ -36,8 +36,13 @@
 //! [`RunOutcome::diff`]). Nothing in the crate reads the wall clock, randomness or the
 //! environment; real-time timers are outside replay and outside this crate.
 //!
+//! Two `rally` programs from the test fixtures (`tests/common/fixtures.rs`) return a hit to
+//! each other until each has counted four:
+//!
 //! ```
-//! use big_bad_bool_runtime::fixtures::{rally, rally_table, signal_message, verified, HIT};
+//! # #[allow(dead_code)]
+//! # mod fixtures { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/fixtures.rs")); }
+//! use fixtures::{rally, rally_table, signal_message, verified, HIT};
 //! use big_bad_bool_runtime::{Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig};
 //!
 //! let rally = verified(rally());
@@ -65,7 +70,9 @@
 //! back final states:
 //!
 //! ```compile_fail,E0599
-//! use big_bad_bool_runtime::fixtures::{rally, rally_table, verified};
+//! # #[allow(dead_code)]
+//! # mod fixtures { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/fixtures.rs")); }
+//! use fixtures::{rally, rally_table, verified};
 //! use big_bad_bool_runtime::{ProgramId, ProgramInstance, Runtime, RuntimeConfig};
 //!
 //! let rally = verified(rally());
@@ -79,7 +86,9 @@
 //! its registered programs (and their steppers) are private:
 //!
 //! ```compile_fail,E0616
-//! use big_bad_bool_runtime::fixtures::{rally, rally_table, verified};
+//! # #[allow(dead_code)]
+//! # mod fixtures { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/fixtures.rs")); }
+//! use fixtures::{rally, rally_table, verified};
 //! use big_bad_bool_runtime::{ProgramId, ProgramInstance, Runtime, RuntimeConfig};
 //!
 //! let rally = verified(rally());
@@ -93,7 +102,9 @@
 //! and a program instance does not hand its program back for stepping:
 //!
 //! ```compile_fail,E0616
-//! use big_bad_bool_runtime::fixtures::{rally, rally_table, verified};
+//! # #[allow(dead_code)]
+//! # mod fixtures { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/fixtures.rs")); }
+//! use fixtures::{rally, rally_table, verified};
 //! use big_bad_bool_runtime::ProgramInstance;
 //!
 //! let rally = verified(rally());
@@ -117,7 +128,6 @@ mod bowl;
 mod builder;
 mod config;
 mod effect;
-pub mod fixtures;
 mod held;
 mod ids;
 mod message;

@@ -5,25 +5,81 @@ A deterministic runtime for many verified big-bad-bool programs on one
 `Stepper`; programs reach each other only through messages on declared routes. Every step is
 prepared, admitted against every bound, and committed only when all of it fits.
 
+```toml
+[dependencies]
+big-bad-bool = { version = "0.1.2", features = ["program"] }  # the programs
+big-bad-bool-runtime = "0.1"
+```
+
 Dependencies, all from crates.io: scope 0.3.2, big-bad-bool 0.1.2 with its `program` feature
 (the program API is `big_bad_bool::program`, which is big-bad-bool-program 0.1.1), uuid_macros
-0.1.0, and ob-serve-a-bowl 0.2.3 behind the `bowl` feature. It is the successor of the
-registry-only experiment `attempts_scope_programs_registry`.
+0.1.0, and ob-serve-a-bowl 0.2.3 behind the `bowl` feature.
 
-## The boundary
+## Three layers
 
 | Layer | Decides | Holds |
 |---|---|---|
-| program (`big_bad_bool::program`) | semantic legality: which contracts actualize, what is written, which effect words are emitted, what is refused | its state, inside its stepper |
-| runtime (this crate) | admission and policy: whether a prepared step's runtime effects fit every bound, and what becomes of a refused input | routes, topology, accounting, timers, children, waiters, trace |
-| scope | when: which task runs in which round (wake ordering, poll budget), the logical clock, bounded mailboxes, timers, cancellation, lifetimes | tasks and wakes |
+| program (`big_bad_bool::program`) | semantic authority: which contracts actualize, what is written, which effect words are emitted, what is refused | its state, inside its stepper |
+| runtime (this crate) | routing, admission and policy: where an effect word goes, whether a prepared step's runtime effects fit every bound, and what becomes of a refused input | routes, topology, accounting, timers, children, waiters, trace |
+| scope | scheduling, lifetime and logical time: which task runs in which round (wake ordering, poll budget), the logical clock, bounded mailboxes, timers, cancellation | tasks and wakes |
 
-## Usage
+## One step: prepare, preflight, commit, perform
+
+1. **prepare**: `Stepper::prepare` gives the step's results, effect words and refusals, with
+   nothing changed.
+2. **preflight all actions**: the program's `EffectTable` (data, resolved against the spec at
+   `build`) maps the effect words to `RuntimeEffect`s, and admission checks every one of them at
+   once: effects per step, routes, deliveries per step, each receiver's free mailbox places (one
+   place of every mailbox is kept for the shutdown word), free timer places, free child places,
+   child keys, the step budget.
+3. **commit**: when all of it fits, `Stepper::commit` applies exactly that preparation.
+4. **perform**: then the runtime acts: sends, Scope logical timers, Scope child tasks and their
+   cancellation, external words, trace marks.
+
+When anything does not fit, nothing is committed and nothing is performed; the trace gets one
+`RuntimeEvent` with every reason and `pre == post`.
+
+`RuntimeEffect`: `Send { port, message }`, `Timer { after, message }` (Scope's logical clock),
+`StartChild { key, child }`, `CancelChild { key }` (Scope's cancellation), `External { tag,
+word }`, `Trace { tag }`. There is no wall-clock timer.
+
+## What holds
+
+- **No admission, no commit.** A step whose runtime effects do not all fit changes no state and
+  performs no action.
+- **State is isolated per Scope task.** `build` makes each program's stepper and the run moves it
+  into the program's task. No API returns a stepper or `&mut` state; the finished run hands back
+  final states (`RunOutcome::programs`). Compile-fail doctests in the crate docs check it.
+- **Programs meet only through messages and effects.** A program reaches another only by a
+  `Send` on a declared `Route`; there is no shared state between programs.
+- **Scope schedules.** Scheduling is Scope's deterministic cooperative scheduling, and time is
+  its logical clock (one tick per scheduler round).
+- **Policies.** A refused input is consumed (`Consume`), retried from a bounded backlog
+  (`Retry`), or held while the program takes nothing new (`Backpressure`); per runtime or per
+  program.
+- **Bowl is observation only.** The `bowl` feature publishes events to ob-serve-a-bowl;
+  observers see events by shared reference and return nothing, and runs with and without them
+  are the same run.
+- **Typed ids.** `ProgramId`, `RouteId`, `RunId` and `TimerId` are uuid_macros v5 newtypes under
+  one namespace per kind (`ProgramId::from_name`, `RouteId::of`, `TimerId::of`,
+  `RunId::of_topology`); no random id is made. Inside a run, programs are dense `ProgramSlot`s
+  in registration order.
+- **Determinism.** The same inputs, topology, configuration and policy give the same
+  `RuntimeEvent`s (sequence, tick, program, message, pre and post digests, preparation,
+  admission and reasons, actions, routing, timers, children, policy dispositions), the same
+  Scope scheduler events, the same external words and the same final states, within the
+  semantics written here: `RunOutcome::same_run`, and `RunOutcome::diff` for the first
+  difference. Nothing in the crate reads the wall clock, randomness or the environment.
+
+## Examples
+
+The programs in these examples are the test fixtures, `tests/common/fixtures.rs`: small
+verified programs with one evidence dimension `signal`. CI runs every example.
+
+**Ping-pong.** [`examples/ping_pong.rs`](examples/ping_pong.rs), in part: two rally programs
+return a hit to each other until each has counted four.
 
 ```rust
-use big_bad_bool_runtime::fixtures::{rally, rally_table, signal_message, verified, HIT};
-use big_bad_bool_runtime::{Port, ProgramId, ProgramInstance, Route, Runtime, RuntimeConfig};
-
 let rally = verified(rally());
 let (a, b) = (ProgramId::from_name("ping"), ProgramId::from_name("pong"));
 let outcome = Runtime::builder(RuntimeConfig::default())
@@ -35,28 +91,62 @@ let outcome = Runtime::builder(RuntimeConfig::default())
     .build()
     .expect("within bounds")
     .run();
-assert_eq!(outcome.steps, 9);
 ```
 
-A `ProgramInstance` is a verified program, its `EffectTable` (data: `(effect dimension, word)`
-to `RuntimeEffect`s, resolved against the spec at `build`), an optional step observer and an
-optional admission policy of its own. `build` makes each program's stepper; the run moves it
-into the program's Scope task. No API returns a stepper or `&mut` state; the finished run hands
-back final states (`RunOutcome::programs`).
+Nine steps commit; the ninth emits one external word.
 
-`RuntimeEffect`: `Send { port, message }`, `Timer { after, message }` (Scope's logical clock),
-`StartChild { key, child }`, `CancelChild { key }` (Scope's cancellation), `External { tag,
-word }`, `Trace { tag }`. There is no wall-clock timer.
+**A refusal under Retry and Backpressure.** [`examples/policies.rs`](examples/policies.rs), in
+part: the source sends to a target whose mailbox (two places) is full.
 
-## One step
+```rust
+let config = RuntimeConfig::with_scheduler(SchedulerConfig::with_ordering(WakeOrdering::Fifo))
+    .policy(policy) // Consume, AdmissionPolicy::retry(4) or Backpressure
+    .limits(RuntimeLimits { mailbox: 2, ..RuntimeLimits::default() });
+let outcome = Runtime::builder(config)
+    .program(source, ProgramInstance::new(&caster, broadcaster_table()))
+    .program(target, ProgramInstance::new(&s, EffectTable::new()))
+    .route(Route::new(source, Port(0), target))
+    .inject(target, signal_message(HIT))
+    .inject(target, signal_message(HIT))
+    .inject(source, signal_message(START))
+    .inject(source, signal_message(START))
+    .build()
+    .expect("within bounds")
+    .run();
+```
 
-1. `prepare`: results, effects and refusals, with nothing changed.
-2. admission: every runtime effect of the step at once, against effects per step, routes,
-   deliveries per step, each receiver's free mailbox places (one place of every mailbox is kept
-   for the shutdown word), free timer places, free child places, child keys, the step budget.
-3. all of it fits: `commit` exactly that preparation, then act. Anything does not fit: nothing is
-   committed and nothing is performed; the trace gets one `RuntimeEvent` with every reason and
-   `pre == post`.
+```text
+backpressure:
+  #5   t1 m2 Mailbox Refused([MailboxFull { to: ProgramSlot(1), needed: 1, free: 0 }]) Backpressured { attempts: 1 }
+  #7   t1 released Mailbox(ProgramSlot(1)), woke [TaskId { slot: 0, generation: 0 }]
+  #8   t2 m2 Pending { attempt: 2 } Admitted Committed
+```
+
+The refused step commits nothing; when the target takes a message, the held input is tried
+again and commits. Under `Consume` the same input is consumed instead.
+
+**A logical timer.** [`examples/logical_timer.rs`](examples/logical_timer.rs), in part: a
+commit arms a Scope logical timer, which delivers its message five ticks later.
+
+```rust
+let run = || {
+    Runtime::builder(RuntimeConfig::default())
+        .program(id, ProgramInstance::new(&p, alarm_table()))
+        .inject(id, signal_message(START))
+        .build()
+        .expect("within bounds")
+        .run()
+};
+let first = run();
+let same = (0..10).all(|_| run().same_run(&first));
+```
+
+```text
+#2 t1 step m0 Admitted [TimerArmed { timer: TimerId(f5aee786-2c62-57db-b38f-c9441a8bed98), message: MessageId(1), after: 5 }]
+#3 t7 timer f5aee786-2c62-57db-b38f-c9441a8bed98 fired: Delivered { to: ProgramSlot(0), message: MessageId(1) }
+#4 t8 step m1 Admitted [External { tag: 2, word: 4 }]
+ten more runs are the same run: true
+```
 
 ## Admission policies
 
@@ -110,27 +200,30 @@ All in `RuntimeConfig::limits`, each with one deterministic result:
 | `trace_events` | 1,000,000 | oldest event dropped and counted (`trace_dropped`, `scheduler_dropped`); sequence numbers keep the gap |
 | `child_cancel_ticks` | 2 | Scope hard-stops a cancelled child after this many rounds |
 
-## Determinism
-
-With logical timers, a run is a function of the wake sequence, Scope's policy and the
-tick-advancement rule (one tick per scheduler round). The same configuration and inputs give the
-same `RuntimeEvent`s (sequence, tick, program, message, pre and post digests, preparation,
-admission and reasons, actions, routing, timers, children, policy dispositions), the same Scope
-scheduler events, the same external words and the same final states: `RunOutcome::same_run`,
-and `RunOutcome::diff` for the first difference. Nothing in the crate reads the wall clock,
-randomness or the environment; real-time timers are outside replay and outside this crate.
-
-Ids are uuid_macros v5 newtypes under one namespace per kind (`ProgramId::from_name`,
-`RouteId::of`, `TimerId::of`, `RunId::of_topology`); no random id is made. Inside a run,
-programs are dense `ProgramSlot`s (registration order).
-
 ## Observers
 
 A `RuntimeObserver` sees every `RuntimeEvent` by shared reference and returns nothing
 (`EventCollector` keeps them). The `bowl` feature adds `BowlRuntimeObserver`, which publishes
 every event to an ob-serve-a-bowl runtime (prepare, refuse, admit, commit, route, timer, cancel,
 policy), and turns on big-bad-bool-program's `BowlObserver` for program step events. A refused
-step publishes `Refused` and never `Committed`. Runs with and without observers are the same run.
+step publishes `Refused` and never `Committed`.
+
+## Limitations
+
+- **Fan-in wakes.** Scope 0.3.2 has no wake for "a bounded mailbox has room again", so a task
+  that frees a mailbox place wakes every program waiting on it. Under heavy contention with
+  `Retry` or `Backpressure` that spends extra refused attempts: 11.4 (`Retry`) and 14.4
+  (`Backpressure`) per commit with 64 senders and one receiver. It costs time, not
+  correctness: the run is still deterministic and every refused attempt commits nothing.
+  [docs/MISSING_APIS.md](docs/MISSING_APIS.md) has the minimal Scope addition that removes it.
+- One runtime runs on one Scope; [docs/SHARDING.md](docs/SHARDING.md) says why there is no
+  sharding here, [docs/NO_STD.md](docs/NO_STD.md) what `no_std` would need, and
+  [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md) has the measurements.
+
+## Rust versions
+
+Rust 1.85 or newer (`rust-version`). The `bowl` feature needs 1.88, the rust-version of
+ob-serve-a-bowl 0.2.3.
 
 ## Run it
 
@@ -144,13 +237,10 @@ cargo run --example policies       # one refused send under Consume, Retry and B
 cargo run --release --example contention   # the determinism table: 5 x 3 x 3 x 10 runs
 
 cargo test                         # every scenario
-cargo +1.88 test --all-features    # plus the bowl observers (ob-serve-a-bowl needs Rust 1.88)
-cargo +1.85 test                   # minimum Rust without bowl
+cargo +1.88 test --all-features    # plus the bowl observers
 cargo +nightly test --doc          # the compile-fail cases with their error codes checked
 cargo bench --bench runtime        # the measurements (about 90 s), docs/MEASUREMENTS.md
 ```
-
-docs/SHARDING.md, docs/NO_STD.md and docs/MISSING_APIS.md say what is not here and why.
 
 ## License
 

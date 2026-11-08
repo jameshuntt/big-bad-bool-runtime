@@ -11,9 +11,7 @@ big-bad-bool = { version = "0.1.2", features = ["program"] }  # the programs
 big-bad-bool-runtime = "0.2"
 ```
 
-Dependencies: scope 0.4.0 (not on crates.io yet: until it is, `Cargo.toml` patches it to the
-`../scope` checkout, branch `capacity-waiters`; that section goes before publishing), and from
-crates.io big-bad-bool 0.1.2 with its `program` feature
+Dependencies, all from crates.io: scope 0.4.0, big-bad-bool 0.1.2 with its `program` feature
 (the program API is `big_bad_bool::program`, which is big-bad-bool-program 0.1.1), uuid_macros
 0.1.0, and ob-serve-a-bowl 0.2.3 behind the `bowl` feature.
 

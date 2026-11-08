@@ -2,14 +2,14 @@
 
 Dates are when crates.io got the version, in UTC.
 
-## 0.2.0 (not published)
+## 0.2.0 (2026-11-08)
 
-Not published. The code is commit [5037941](https://github.com/jameshuntt/big-bad-bool-runtime/commit/5037941c40325db55e7104b66da8d1d0027d4256)
-on the branch `scope-capacity-waiters`, from `main` at a6b3933; this entry and the docs are the commit
-after it. Line links are at 5037941; they open once the branch is pushed. It needs scope 0.4.0, which
-is not on crates.io yet: `Cargo.toml` says `scope = "0.4.0"` and, until scope 0.4.0 is published, a
-`[patch.crates-io]` to `../scope` (branch `capacity-waiters`) marked "remove at release". With that
-section the package cannot be verified against crates.io; it goes before publishing.
+On crates.io dependencies only: scope 0.4.0, big-bad-bool 0.1.2 with `program`
+(big-bad-bool-program 0.1.1), uuid_macros 0.1.0, and ob-serve-a-bowl 0.2.3 behind `bowl`.
+The code is commit [5037941](https://github.com/jameshuntt/big-bad-bool-runtime/commit/5037941c40325db55e7104b66da8d1d0027d4256);
+line links are at 5037941. This entry and the docs are the commit after it, 91bf804; the release
+commit drops the `[patch.crates-io]` that pointed scope at the `../scope` checkout before scope 0.4.0
+was published.
 
 Minor version: scope's types are in this crate's API (`StepRecord::wake`, `SchedEvent`,
 `RuntimeConfig::with_scheduler`), and scope goes from 0.3 to 0.4; for a 0.x crate that is a minor

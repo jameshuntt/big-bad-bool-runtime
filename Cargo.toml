@@ -38,9 +38,3 @@ harness = false
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
-
-# REMOVE AT RELEASE: scope 0.4.0 is not on crates.io yet. Until it is, the version above
-# resolves to the checkout beside this one (branch capacity-waiters). Delete this section
-# before `cargo publish`; with it the package cannot be verified against crates.io.
-[patch.crates-io]
-scope = { path = "../scope" }

@@ -585,6 +585,8 @@ dependencies = [
 [[package]]
 name = "scope"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "824efa6d588b332f6e4940a3addcf55a083530ab90fd12ab6cad70470815d161"
 dependencies = [
  "loom",
  "waker_tables",

@@ -6,7 +6,7 @@ named here.
 
 ## 1. scope: a wake when a bounded mailbox has room again
 
-- **Status: added in scope 0.4.0 (branch `capacity-waiters`, not published yet), used since 0.2.0.**
+- **Status: added in scope 0.4.0, used since 0.2.0.**
 - **Needed by:** `Retry` and `Backpressure`. A held input refused `MailboxFull` must run again
   when the receiver frees a place.
 - **What 0.1.0 did (scope 0.3.2):** waiter lists in the runtime's Scope environment

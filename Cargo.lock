@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "big-bad-bool-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "big-bad-bool",
  "criterion",
@@ -584,9 +584,7 @@ dependencies = [
 
 [[package]]
 name = "scope"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc4e9649ae7f5a91c5ef255ba336f169ffe05c84cd145e901a6ddd5c27a21a2d"
+version = "0.4.0"
 dependencies = [
  "loom",
  "waker_tables",

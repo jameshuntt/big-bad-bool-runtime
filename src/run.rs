@@ -15,13 +15,20 @@
 //! 2. held inputs: `Retry` retries its backlog oldest first and stops at the first entry refused
 //!    again; `Backpressure` attempts its pending input;
 //! 3. unless `Backpressure` still holds an input, at most one new mailbox message;
-//! 4. when this poll freed places in the program's own mailbox, every task waiting for one is
-//!    woken; then the task yields (more mail), or waits.
+//! 4. when this poll freed a place of its own mailbox that Scope does not see (it committed or
+//!    dropped the input `Backpressure` held) or took a message, the tasks on the runtime's list
+//!    for that mailbox are woken; then the task yields (more mail), or waits.
 //!
-//! A held input waits for the place its refusal named ([`Resource`]): the task registers on that
-//! place's waiter list, and the task that frees the place wakes the whole list in the order it
-//! was registered, through `Cx::wake_with(.., WakeReason::Manual)`. Scope has no wake for "a
-//! bounded mailbox has room again"; this list is the substitute (docs/MISSING_APIS.md).
+//! A held input waits for the place its refusal named ([`Resource`]). A mailbox place is Scope's:
+//! the task registers in the receiver's bounded mailbox (`BoundedSender::wake_when_free`), a
+//! receive holds the freed place for the oldest waiter and wakes it (`WakeReason::Capacity`), and
+//! the woken task fills it with `try_send_from`. The task keeps the `CapacityWait` of each
+//! mailbox it waits on and drops it when its refusals no longer name that mailbox, or when it
+//! ends, which hands a held place to the next waiter. Two waits stay on a runtime list per
+//! mailbox (`Shared::place_waiters`), because Scope cannot see the place they need: the place an
+//! input `Backpressure` holds outside the mailbox (docs/MISSING_APIS.md, item 2), and a step that
+//! needs more than one place in one mailbox. Timer and child places keep their runtime lists,
+//! woken with `WakeReason::Manual`.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
@@ -29,8 +36,9 @@ use std::rc::Rc;
 
 use big_bad_bool::program::{DimensionId, Observation, Observer, Stepper, VerifiedProgram};
 use scope::{
-    BoundedMailbox, BoundedSender, CancelEscalation, CancelReason, Cx, JoinError, Scope,
-    ScopedTask, TaskId, TaskPoll, Tick, TickSleepTask, TrySendError, WakeReason,
+    BoundedMailbox, BoundedSender, CancelEscalation, CancelReason, CapacityWait, Cx, JoinError,
+    Scope, ScopedTask, TaskId, TaskPoll, Tick, TickSleepTask, TrySendError, WaitRegistration,
+    WakeReason,
 };
 
 use crate::builder::{Instance, Runtime};
@@ -58,18 +66,12 @@ pub(crate) struct Input {
     message: RuntimeMessage,
 }
 
-/// What travels in a program's Scope mailbox.
-pub(crate) enum Envelope {
-    Deliver(Input),
-    Shutdown,
-}
-
 /// Every program's bounded mailbox sender, by slot, set once after every program task is
 /// spawned; the run's journal (message counter, event counter, retained trace, observer); the
 /// places `Backpressure` holds outside the mailboxes; and the shutdown flag. It lives outside
 /// Scope's environment so the run can number and record injections between epochs. One thread.
 struct Directory<'w> {
-    senders: OnceCell<Vec<BoundedSender<Envelope>>>,
+    senders: OnceCell<Vec<BoundedSender<Input>>>,
     record: bool,
     observing: bool,
     next_message: Cell<u64>,
@@ -111,16 +113,17 @@ impl Directory<'_> {
         }
     }
 
-    fn sender(&self, slot: usize) -> &BoundedSender<Envelope> {
+    fn sender(&self, slot: usize) -> &BoundedSender<Input> {
         &self.senders.get().expect("set before the first round")[slot]
     }
 
-    /// Places a sender may fill in `slot`'s mailbox: its free places less the one kept for the
-    /// shutdown word and less the input `Backpressure` holds for it. `None` when the mailbox is
-    /// closed (the program finished).
-    fn free(&self, slot: usize) -> Option<usize> {
+    /// Places sender `task` may fill in `slot`'s mailbox (`None`: a sender outside the run): the
+    /// places nobody holds, and the one Scope holds for `task`, less the input `Backpressure` holds
+    /// for `slot`. `None` when the mailbox is closed (the program finished).
+    fn free(&self, slot: usize, task: Option<TaskId>) -> Option<usize> {
         let tx = self.sender(slot);
-        (!tx.is_closed()).then(|| tx.free().saturating_sub(1 + self.held[slot].get()))
+        let free = task.map_or_else(|| tx.free(), |t| tx.free_for(t));
+        (!tx.is_closed()).then(|| free.saturating_sub(self.held[slot].get()))
     }
 }
 
@@ -140,7 +143,9 @@ pub(crate) struct Shared {
     children: BTreeMap<(usize, ChildKey), ChildSlot>,
     external: Vec<ExternalRecord>,
     sched: Option<Rc<RefCell<SchedState>>>,
-    mailbox_waiters: Vec<Vec<TaskId>>,
+    /// Per mailbox, the tasks waiting for a place Scope cannot give them: the mailbox's
+    /// `Backpressure` input holds it, or the step needs more than one.
+    place_waiters: Vec<Vec<TaskId>>,
     timer_waiters: Vec<TaskId>,
     child_waiters: Vec<TaskId>,
     counts: PolicyCounts,
@@ -149,31 +154,34 @@ pub(crate) struct Shared {
 impl Shared {
     fn waiters(&mut self, resource: Resource) -> &mut Vec<TaskId> {
         match resource {
-            Resource::Mailbox(s) => &mut self.mailbox_waiters[s.0 as usize],
+            Resource::Mailbox(s) => &mut self.place_waiters[s.0 as usize],
             Resource::Timers => &mut self.timer_waiters,
             Resource::Children => &mut self.child_waiters,
         }
     }
 
-    /// `task` waits for every place `reasons` name, each list in the order tasks began waiting.
-    fn wait(&mut self, task: TaskId, reasons: &[RuntimeRefusal]) {
-        for resource in reasons.iter().filter_map(RuntimeRefusal::resource) {
-            let list = self.waiters(resource);
-            if !list.contains(&task) {
-                list.push(task);
-            }
+    /// `task` waits on the runtime list of `resource`, in the order tasks began waiting.
+    fn wait_on_list(&mut self, task: TaskId, resource: Resource) {
+        let list = self.waiters(resource);
+        if !list.contains(&task) {
+            list.push(task);
         }
     }
 }
 
-/// `resource` was freed: wakes every task waiting for it, in the order they began waiting.
+/// `resource` was freed: wakes every task on its runtime list, in the order they began waiting
+/// (`WakeReason::Capacity` for a mailbox place, `WakeReason::Manual` for a timer or child place).
 fn release<'env>(cx: &mut Cx<'_, 'env, Shared>, directory: &Directory<'_>, resource: Resource) {
     let woken = std::mem::take(cx.resources.waiters(resource));
     if woken.is_empty() {
         return;
     }
+    let reason = match resource {
+        Resource::Mailbox(_) => WakeReason::Capacity,
+        Resource::Timers | Resource::Children => WakeReason::Manual,
+    };
     for task in &woken {
-        cx.wake_with(*task, WakeReason::Manual);
+        cx.wake_with(*task, reason);
     }
     directory.emit(cx.now_tick(), || RuntimeEventKind::Released {
         resource,
@@ -181,11 +189,48 @@ fn release<'env>(cx: &mut Cx<'_, 'env, Shared>, directory: &Directory<'_>, resou
     });
 }
 
-/// Sends one message already numbered into `to`'s bounded mailbox.
-fn deliver_as(directory: &Directory<'_>, to: usize, input: Input) -> Delivery {
+/// `task` waits for one place of `to`'s mailbox: Scope's capacity wake, whose registration comes
+/// back to be kept, unless Scope finds a place free for the task that the runtime's bound does not
+/// let it use (the input `Backpressure` holds for `to`), which puts the task on the runtime list.
+fn wait_for_one_place<'env>(
+    cx: &mut Cx<'_, 'env, Shared>,
+    directory: &Directory<'_>,
+    task: TaskId,
+    to: usize,
+) -> Option<CapacityWait<Input>> {
+    match directory.sender(to).wake_when_free(task) {
+        WaitRegistration::Registered(wait) => Some(wait),
+        WaitRegistration::AlreadyRegistered | WaitRegistration::Closed => None,
+        WaitRegistration::FreeNow => {
+            cx.resources.wait_on_list(task, Resource::Mailbox(slot(to)));
+            None
+        }
+    }
+}
+
+/// Gives up a registration in `to`'s mailbox. Its held place, if it had one, goes to the next
+/// waiter or comes free, so the runtime list of that mailbox is woken too.
+fn gave_up<'env>(
+    cx: &mut Cx<'_, 'env, Shared>,
+    directory: &Directory<'_>,
+    wait: CapacityWait<Input>,
+    to: usize,
+) {
+    drop(wait);
+    release(cx, directory, Resource::Mailbox(slot(to)));
+}
+
+/// Sends one message already numbered into `to`'s bounded mailbox, as task `from` (which may
+/// hold a place there) or from outside the run (`None`).
+fn deliver_as(
+    directory: &Directory<'_>,
+    to: usize,
+    input: Input,
+    from: Option<TaskId>,
+) -> Delivery {
     let to_slot = slot(to);
     let id = input.id;
-    match directory.free(to) {
+    match directory.free(to, from) {
         None => {
             return Delivery::Refused {
                 message: id,
@@ -204,7 +249,12 @@ fn deliver_as(directory: &Directory<'_>, to: usize, input: Input) -> Delivery {
         }
         Some(_) => {}
     }
-    match directory.sender(to).try_send(Envelope::Deliver(input)) {
+    let tx = directory.sender(to);
+    let sent = match from {
+        Some(task) => tx.try_send_from(input, task),
+        None => tx.try_send(input),
+    };
+    match sent {
         Ok(()) => Delivery::Delivered {
             to: to_slot,
             message: id,
@@ -261,6 +311,7 @@ fn admit(
     shared: &Shared,
     directory: &Directory<'_>,
     me: usize,
+    task: TaskId,
     effects: &[RuntimeEffect],
 ) -> Result<Vec<Planned>, Vec<RuntimeRefusal>> {
     let limits = shared.limits;
@@ -330,7 +381,7 @@ fn admit(
         });
     }
     for (to, needed) in &per_target {
-        match directory.free(*to) {
+        match directory.free(*to, Some(task)) {
             None => refusals.push(RuntimeRefusal::TargetFinished { to: slot(*to) }),
             Some(free) if free < *needed => refusals.push(RuntimeRefusal::MailboxFull {
                 to: slot(*to),
@@ -391,16 +442,75 @@ struct ProgramTask<'p, 'd, 'w, O: Observer> {
     stepper: Option<Stepper<'p, O>>,
     table: ResolvedTable,
     policy: AdmissionPolicy,
-    inbox: BoundedMailbox<Envelope>,
+    inbox: BoundedMailbox<Input>,
     directory: &'d Directory<'w>,
     position: u32,
     steps: u64,
     refused: u64,
     backlog: Backlog<Input>,
     pending: Option<(Input, u32)>,
+    /// The mailboxes this task waits on through Scope, by slot, each with its registration.
+    waits: BTreeMap<usize, CapacityWait<Input>>,
+    /// The mailboxes the refusals of this poll named.
+    wanted: Vec<usize>,
+    /// This poll freed a place of its own mailbox: it took a message it does not hold, or
+    /// committed or dropped the input `Backpressure` held.
+    freed: bool,
 }
 
 impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
+    /// The task waits for every place `reasons` name.
+    fn wait_for<'env>(&mut self, cx: &mut Cx<'_, 'env, Shared>, reasons: &[RuntimeRefusal])
+    where
+        'd: 'env,
+    {
+        let task = cx.id();
+        for r in reasons {
+            match *r {
+                RuntimeRefusal::MailboxFull { to, needed, .. } => {
+                    let s = to.0 as usize;
+                    if !self.wanted.contains(&s) {
+                        self.wanted.push(s);
+                    }
+                    if needed > 1 {
+                        // A held place is one place: give it up rather than keep it while
+                        // waiting for more (two such senders could keep each other waiting).
+                        if let Some(wait) = self.waits.remove(&s) {
+                            gave_up(cx, self.directory, wait, s);
+                        }
+                        cx.resources.wait_on_list(task, Resource::Mailbox(to));
+                    } else if let Some(wait) = wait_for_one_place(cx, self.directory, task, s) {
+                        self.waits.insert(s, wait);
+                    }
+                }
+                _ => {
+                    if let Some(resource) = r.resource() {
+                        cx.resources.wait_on_list(task, resource);
+                    }
+                }
+            }
+        }
+    }
+
+    /// After a poll: gives up every Scope wait this poll's refusals no longer name.
+    fn settle_waits<'env>(&mut self, cx: &mut Cx<'_, 'env, Shared>)
+    where
+        'd: 'env,
+    {
+        let stale: Vec<usize> = self
+            .waits
+            .keys()
+            .filter(|s| !self.wanted.contains(s))
+            .copied()
+            .collect();
+        for s in stale {
+            if let Some(wait) = self.waits.remove(&s) {
+                gave_up(cx, self.directory, wait, s);
+            }
+        }
+        self.wanted.clear();
+    }
+
     fn stepper(&self) -> &Stepper<'p, O> {
         self.stepper
             .as_ref()
@@ -415,20 +525,22 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
         state_digest(self.program, self.stepper().state())
     }
 
-    /// Ends the task: drops what is left in the mailbox and what is held, records the program
-    /// finished, and wakes every task waiting for a place in its mailbox (they find it closed).
-    /// The mailbox closes for good when the task (and so its `BoundedMailbox`) is dropped.
+    /// Ends the task: drops what is left in the mailbox and what is held, gives up every place it
+    /// waits on, records the program finished, closes its mailbox (Scope wakes every task waiting
+    /// for a place in it; they find it closed) and wakes the runtime list of its mailbox.
     fn end<'env>(&mut self, cx: &mut Cx<'_, 'env, Shared>) -> TaskPoll
     where
         'd: 'env,
     {
         let mut dropped = Vec::new();
-        while let Some(envelope) = self.inbox.try_recv() {
-            if let Envelope::Deliver(input) = envelope {
-                dropped.push(input.id);
-            }
+        while let Some(input) = self.inbox.try_recv() {
+            dropped.push(input.id);
         }
         self.inbox.close();
+        self.wanted.clear();
+        for (s, wait) in std::mem::take(&mut self.waits) {
+            gave_up(cx, self.directory, wait, s);
+        }
         let mut held: Vec<MessageId> = self.backlog.drain().map(|i| i.id).collect();
         if let Some((input, _)) = self.pending.take() {
             held.push(input.id);
@@ -537,7 +649,7 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
             .collect();
 
         // Phase 2: the runtime's bounds, all of them, before anything is done.
-        match admit(cx.resources, self.directory, self.index, &effects) {
+        match admit(cx.resources, self.directory, self.index, task, &effects) {
             Err(reasons) => {
                 // Refused: the preparation is dropped and nothing changes.
                 let summaries = if emitting {
@@ -653,7 +765,7 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
             let a = self.attempt(cx, input);
             let (disposition, go_on) = backlog.settle(a.tried, max_attempts);
             if disposition.is_held() {
-                cx.resources.wait(cx.id(), &a.reasons);
+                self.wait_for(cx, &a.reasons);
             }
             Self::count(cx.resources, source, disposition);
             self.record(cx.now_tick(), message, origin, source, a.draft, disposition);
@@ -688,10 +800,13 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
         );
         match still {
             Some(n) => {
-                cx.resources.wait(cx.id(), &a.reasons);
+                self.wait_for(cx, &a.reasons);
                 self.pending = Some((input, n));
             }
-            None => self.directory.held[self.index].set(0),
+            None => {
+                self.directory.held[self.index].set(0);
+                self.freed = true;
+            }
         }
     }
 
@@ -718,7 +833,10 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
             },
         };
         if disposition.is_held() {
-            cx.resources.wait(cx.id(), &a.reasons);
+            self.wait_for(cx, &a.reasons);
+        }
+        if self.pending.is_none() {
+            self.freed = true;
         }
         Self::count(cx.resources, InputSource::Mailbox, disposition);
         self.record(
@@ -760,7 +878,7 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
                                 origin,
                                 message: message.clone(),
                             };
-                            deliver_as(self.directory, to, input)
+                            deliver_as(self.directory, to, input, Some(cx.id()))
                         })
                         .collect();
                     ActionRecord::Sent { port, deliveries }
@@ -782,6 +900,7 @@ impl<'p, 'd, 'w, O: Observer> ProgramTask<'p, 'd, 'w, O> {
                             sleep: TickSleepTask::new(after),
                             slept: false,
                             waiting: false,
+                            wait: None,
                             directory: self.directory,
                         },
                     );
@@ -852,7 +971,7 @@ impl<'env, 'p: 'env, 'd: 'env, 'w: 'env, O: Observer + 'env> ScopedTask<'env, Sh
         if self.directory.shutdown.get() {
             return self.end(cx);
         }
-        let before = self.directory.free(self.index);
+        self.freed = false;
         // Held inputs first, before any new mailbox message.
         match self.policy {
             AdmissionPolicy::Consume => {}
@@ -861,15 +980,14 @@ impl<'env, 'p: 'env, 'd: 'env, 'w: 'env, O: Observer + 'env> ScopedTask<'env, Sh
         }
         // Then at most one new message, unless an input is still held back.
         if !self.halted() && self.pending.is_none() {
-            match self.inbox.try_recv() {
-                None => {}
-                Some(Envelope::Shutdown) => return self.end(cx),
-                Some(Envelope::Deliver(input)) => self.take(cx, input),
+            if let Some(input) = self.inbox.try_recv() {
+                self.take(cx, input);
             }
         }
-        if self.directory.free(self.index) > before {
+        if self.freed {
             release(cx, self.directory, Resource::Mailbox(slot(self.index)));
         }
+        self.settle_waits(cx);
         if self.halted() {
             self.end(cx)
         } else if self.pending.is_none() && !self.inbox.is_empty() {
@@ -890,6 +1008,8 @@ struct TimerTask<'d, 'w> {
     sleep: TickSleepTask,
     slept: bool,
     waiting: bool,
+    /// Its registration in the parent's mailbox while it waits for a place there.
+    wait: Option<CapacityWait<Input>>,
     directory: &'d Directory<'w>,
 }
 
@@ -904,12 +1024,11 @@ impl<'env, 'd: 'env, 'w: 'env> ScopedTask<'env, Shared> for TimerTask<'d, 'w> {
         }
         let program = slot(self.parent);
         let (timer, message) = (self.timer, self.id);
-        if self.directory.free(self.parent) == Some(0) {
+        let me = cx.id();
+        if self.directory.free(self.parent, Some(me)) == Some(0) {
             // No place in the parent's mailbox: wait for one, keep the timer place.
-            let me = cx.id();
-            let list = cx.resources.waiters(Resource::Mailbox(program));
-            if !list.contains(&me) {
-                list.push(me);
+            if let Some(wait) = wait_for_one_place(cx, self.directory, me, self.parent) {
+                self.wait = Some(wait);
             }
             if !self.waiting {
                 self.waiting = true;
@@ -928,7 +1047,9 @@ impl<'env, 'd: 'env, 'w: 'env> ScopedTask<'env, Shared> for TimerTask<'d, 'w> {
             origin: Origin::Timer(program, self.timer),
             message: self.message.take().expect("fires once"),
         };
-        let delivery = deliver_as(self.directory, self.parent, input);
+        let delivery = deliver_as(self.directory, self.parent, input, Some(me));
+        // The delivery used the place held for it, if one was: the registration is spent.
+        self.wait = None;
         self.directory
             .emit(cx.now_tick(), || RuntimeEventKind::TimerFired {
                 program,
@@ -984,7 +1105,7 @@ impl<'env, 'd: 'env, 'w: 'env> ScopedTask<'env, Shared> for TickerTask<'d, 'w> {
         if flagged || early {
             return self.end(cx, true);
         }
-        if self.remaining == 0 || self.directory.free(self.parent).is_none() {
+        if self.remaining == 0 || self.directory.free(self.parent, None).is_none() {
             return self.end(cx, false);
         }
         self.remaining -= 1;
@@ -994,7 +1115,7 @@ impl<'env, 'd: 'env, 'w: 'env> ScopedTask<'env, Shared> for TickerTask<'d, 'w> {
             origin: Origin::Child(program, self.key),
             message: self.message.clone(),
         };
-        let delivery = deliver_as(self.directory, self.parent, input);
+        let delivery = deliver_as(self.directory, self.parent, input, None);
         let key = self.key;
         self.directory
             .emit(cx.now_tick(), || RuntimeEventKind::ChildTick {
@@ -1013,7 +1134,7 @@ impl<'p, O: Observer, W: RuntimeObserver> Runtime<'p, O, W> {
     ///
     /// Each epoch sends its injections, then runs Scope until nothing is runnable and no timer
     /// waits. After the last epoch the run sets its shutdown flag and wakes every program
-    /// through the place kept for it in its mailbox; Scope runs again, each task ends (dropping
+    /// (`Scope::waker_for(.., WakeReason::Shutdown)`); Scope runs again, each task ends (dropping
     /// what it holds, recorded) and hands back its final state through Scope's join handle.
     /// Every bound reached during the run is a recorded, deterministic event, so the run has no
     /// error of its own: a program task that panicked is in `RunOutcome::lost`.
@@ -1044,13 +1165,13 @@ impl<'p, O: Observer, W: RuntimeObserver> Runtime<'p, O, W> {
             children: BTreeMap::new(),
             external: Vec::new(),
             sched: sched.clone(),
-            mailbox_waiters: vec![Vec::new(); n],
+            place_waiters: vec![Vec::new(); n],
             timer_waiters: Vec::new(),
             child_waiters: Vec::new(),
             counts: PolicyCounts::default(),
         };
         let last_epoch = injections.last().map_or(0, |(e, _, _)| *e);
-        let capacity = limits.mailbox.saturating_add(1);
+        let capacity = limits.mailbox;
         let observer = RefCell::new(observer);
         let observing = observer.borrow().observes();
 
@@ -1103,6 +1224,9 @@ impl<'p, O: Observer, W: RuntimeObserver> Runtime<'p, O, W> {
                         refused: 0,
                         backlog,
                         pending: None,
+                        waits: BTreeMap::new(),
+                        wanted: Vec::new(),
+                        freed: false,
                     },
                     |task: &mut ProgramTask<'p, '_, '_, O>, _shared: &mut Shared| task.finish(),
                 );
@@ -1123,14 +1247,16 @@ impl<'p, O: Observer, W: RuntimeObserver> Runtime<'p, O, W> {
                         origin: Origin::External,
                         message,
                     };
-                    let delivery = deliver_as(&directory, to, input);
+                    let delivery = deliver_as(&directory, to, input, None);
                     directory.emit(scope.now_tick(), || RuntimeEventKind::Injected { delivery });
                 }
                 runs.push(scope.run());
             }
             directory.shutdown.set(true);
             for index in 0..n {
-                let _ = directory.sender(index).try_send(Envelope::Shutdown);
+                scope
+                    .waker_for(directory.sender(index).target(), WakeReason::Shutdown)
+                    .wake();
             }
             scope.run()
         };

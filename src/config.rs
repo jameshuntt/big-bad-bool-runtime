@@ -9,8 +9,7 @@ pub const MAX_PROGRAMS: usize = 4096;
 pub const MAX_ROUTES: usize = 65_536;
 /// Default most routes from one `(program, port)`; past it `build` returns `BuildError::FanOut`.
 pub const MAX_FANOUT: usize = 64;
-/// Default most undelivered messages per program: the capacity a sender sees in its Scope
-/// bounded mailbox (the mailbox has one more place, kept for the runtime's shutdown word).
+/// Default most undelivered messages per program: the capacity of its Scope bounded mailbox.
 pub const MAX_MAILBOX: usize = 64;
 /// Default largest retry backlog a program may have; a `Retry` policy asking for more is a
 /// `BuildError::Backlog`.

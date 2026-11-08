@@ -422,8 +422,11 @@ pub enum RuntimeEventKind {
         /// Whether Scope's cancel flag (or the runtime's flag before its first poll) was set.
         cancelled: bool,
     },
-    /// A place was released and every task waiting for it was woken, in the order they began
-    /// waiting (Scope `WakeReason::Manual`).
+    /// A place was released and every task on the runtime's list for it was woken, in the order
+    /// they began waiting: a timer or child place (Scope `WakeReason::Manual`), or a mailbox place
+    /// Scope's own capacity wake cannot give (`WakeReason::Capacity`: the place a `Backpressure`
+    /// input holds, or a step needing several places). A mailbox place a waiter registered for in
+    /// Scope is held for it and woken by Scope, with no `Released` event.
     Released {
         /// The place.
         resource: Resource,

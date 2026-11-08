@@ -1,6 +1,6 @@
 [package]
 name = "big-bad-bool-runtime"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -23,7 +23,7 @@ default = []
 bowl = ["dep:ob-serve-a-bowl", "big-bad-bool/program-bowl"]
 
 [dependencies]
-scope = "0.3.2"
+scope = "0.4.0"
 big-bad-bool = { version = "0.1.2", features = ["program"] }
 uuid_macros = "0.1.0"
 ob-serve-a-bowl = { version = "0.2.3", optional = true }
@@ -38,3 +38,9 @@ harness = false
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+
+# REMOVE AT RELEASE: scope 0.4.0 is not on crates.io yet. Until it is, the version above
+# resolves to the checkout beside this one (branch capacity-waiters). Delete this section
+# before `cargo publish`; with it the package cannot be verified against crates.io.
+[patch.crates-io]
+scope = { path = "../scope" }

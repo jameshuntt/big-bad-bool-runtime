@@ -2,6 +2,7 @@
 
 mod common;
 
+use big_bad_bool_runtime::SchedEvent;
 use big_bad_bool_runtime::{
     ActionRecord, Admission, AdmissionPolicy, Delivery, Disposition, EffectTable, InputSource,
     Origin, Port, ProgramInstance, ProgramSlot, Resource, Route, Runtime, RuntimeEventKind,
@@ -11,7 +12,7 @@ use common::fixtures::{
     HIT, START, alarm, broadcaster, broadcaster_table, rally_table, signal_message, sink,
     stalled_table, two_timers_table, verified, volley,
 };
-use scope::{SchedulerConfig, WakeOrdering};
+use scope::{SchedulerConfig, WakeOrdering, WakeReason};
 
 use common::{BUDGETS, fifo, id, refused, scheduler, start_digest, steps};
 
@@ -106,18 +107,22 @@ fn retry_backlogs_the_refused_input_and_the_same_input_commits_once_a_place_is_f
     assert_eq!(first.disposition, Disposition::Backlogged { len: 1 });
     assert_eq!(first.pre, first.post);
     assert!(first.actions.is_empty());
-    // The target's receive freed a place and woke the waiting source, in one epoch.
-    let released = outcome
-        .log
+    // The target's receive freed a place, Scope held it for the waiting source and woke it, in
+    // one epoch: one capacity wake, the one the second attempt came from, and no runtime list.
+    assert_eq!(second.wake, Some(WakeReason::Capacity));
+    let woken = outcome
+        .scheduler
         .iter()
-        .position(|e| matches!(&e.kind, RuntimeEventKind::Released { resource: Resource::Mailbox(ProgramSlot(1)), woken } if woken.len() == 1))
-        .expect("the target released a place");
-    let second_at = outcome
-        .log
-        .iter()
-        .position(|e| e.step() == Some(second))
-        .unwrap();
-    assert!(released < second_at);
+        .filter(|e| matches!(e, SchedEvent::Wake(t, WakeReason::Capacity) if *t == second.task))
+        .count();
+    assert_eq!(woken, 1, "one capacity wake, for the one freed place");
+    assert!(!outcome.log.iter().any(|e| matches!(
+        &e.kind,
+        RuntimeEventKind::Released {
+            resource: Resource::Mailbox(ProgramSlot(1)),
+            ..
+        }
+    )));
     // The same input (same message id), retried: same pre-digest, results and effects; commits.
     assert_eq!(second.message, first.message);
     assert_eq!(second.source, InputSource::Backlog { attempt: 2 });

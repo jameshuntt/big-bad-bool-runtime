@@ -8,10 +8,12 @@ prepared, admitted against every bound, and committed only when all of it fits.
 ```toml
 [dependencies]
 big-bad-bool = { version = "0.1.2", features = ["program"] }  # the programs
-big-bad-bool-runtime = "0.1"
+big-bad-bool-runtime = "0.2"
 ```
 
-Dependencies, all from crates.io: scope 0.3.2, big-bad-bool 0.1.2 with its `program` feature
+Dependencies: scope 0.4.0 (not on crates.io yet: until it is, `Cargo.toml` patches it to the
+`../scope` checkout, branch `capacity-waiters`; that section goes before publishing), and from
+crates.io big-bad-bool 0.1.2 with its `program` feature
 (the program API is `big_bad_bool::program`, which is big-bad-bool-program 0.1.1), uuid_macros
 0.1.0, and ob-serve-a-bowl 0.2.3 behind the `bowl` feature.
 
@@ -29,8 +31,8 @@ Dependencies, all from crates.io: scope 0.3.2, big-bad-bool 0.1.2 with its `prog
    nothing changed.
 2. **preflight all actions**: the program's `EffectTable` (data, resolved against the spec at
    `build`) maps the effect words to `RuntimeEffect`s, and admission checks every one of them at
-   once: effects per step, routes, deliveries per step, each receiver's free mailbox places (one
-   place of every mailbox is kept for the shutdown word), free timer places, free child places,
+   once: effects per step, routes, deliveries per step, each receiver's free mailbox places (a place
+   Scope holds for a woken waiter counts as taken, except for that waiter), free timer places, free child places,
    child keys, the step budget.
 3. **commit**: when all of it fits, `Stepper::commit` applies exactly that preparation.
 4. **perform**: then the runtime acts: sends, Scope logical timers, Scope child tasks and their
@@ -170,12 +172,19 @@ place, a child key in use) wait for a place the run frees.
 Timer deliveries and child ticks are mailbox messages, so held inputs go before them too.
 
 **Wake rule.** A held input waits for the place its refusal named (`Resource::Mailbox`,
-`Timers`, `Children`). The task that frees the place (a receive, a commit of a held input or a
-finish for a mailbox; a delivered timer; an ended child) wakes every waiting task, in the order
-they began waiting, through `Cx::wake_with(.., WakeReason::Manual)`, and records a `Released`
-event. A held program is also polled on every other wake it gets (a new message in its mailbox),
-and attempts its held input then. Scope has no wake for "a bounded mailbox has room again"; this
-waiter list is the substitute (docs/MISSING_APIS.md).
+`Timers`, `Children`). A mailbox place is Scope's to give: the task registers in the receiver's
+bounded mailbox (`BoundedSender::wake_when_free`, scope 0.4), in the order senders began waiting.
+A receive holds each freed place for the oldest waiter and wakes only it
+(`WakeReason::Capacity`); the woken task fills it (`try_send_from`), and nobody else can take it.
+The task gives up a registration (and a held place, which goes to the next waiter) when its
+refusals no longer name that mailbox, and when it ends. Two waits stay on the runtime's own list
+for the mailbox, because Scope cannot see the place they need: the place an input `Backpressure`
+holds outside its mailbox, and a step that needs more than one place in one mailbox. The program
+that frees such a place (a receive, a commit or drop of its held input, its finish) wakes that
+list, in order, and records a `Released` event. Timer and child places keep runtime lists, woken
+by the delivered timer or the ended child (`WakeReason::Manual`, `Released`). A held program is
+also polled on every other wake it gets (a new message in its mailbox), and attempts its held
+input then.
 
 A timer whose tick comes while its program's mailbox is full waits for a place
 (`TimerWaiting`) and keeps its timer place until it delivers. A child tick into a full mailbox is
@@ -210,12 +219,14 @@ step publishes `Refused` and never `Committed`.
 
 ## Limitations
 
-- **Fan-in wakes.** Scope 0.3.2 has no wake for "a bounded mailbox has room again", so a task
-  that frees a mailbox place wakes every program waiting on it. Under heavy contention with
-  `Retry` or `Backpressure` that spends extra refused attempts: 11.4 (`Retry`) and 14.4
-  (`Backpressure`) per commit with 64 senders and one receiver. It costs time, not
-  correctness: the run is still deterministic and every refused attempt commits nothing.
-  [docs/MISSING_APIS.md](docs/MISSING_APIS.md) has the minimal Scope addition that removes it.
+- **Fan-in wakes, two cases left.** Since scope 0.4 a freed mailbox place wakes one waiting
+  sender, the oldest, and is held for it: with 64 senders and one receiver, 1.41 (`Retry`) and
+  0.49 (`Backpressure`) refused attempts per committed step, against 11.4 and 14.4 in 0.1.0
+  (docs/MEASUREMENTS.md). Two waits still go through the runtime's own list, which wakes every
+  task on it when the place may have come free: senders to a program whose `Backpressure` input
+  holds a place (Scope cannot see that place; docs/MISSING_APIS.md item 2), and steps that need
+  more than one place in one mailbox (they give up a held place and wait for unheld ones, so
+  under steady single-place contention they can wait long). It costs time, not correctness.
 - One runtime runs on one Scope; [docs/SHARDING.md](docs/SHARDING.md) says why there is no
   sharding here, [docs/NO_STD.md](docs/NO_STD.md) what `no_std` would need, and
   [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md) has the measurements.

@@ -6,25 +6,40 @@ named here.
 
 ## 1. scope: a wake when a bounded mailbox has room again
 
+- **Status: added in scope 0.4.0 (branch `capacity-waiters`, not published yet), used since 0.2.0.**
 - **Needed by:** `Retry` and `Backpressure`. A held input refused `MailboxFull` must run again
   when the receiver frees a place.
-- **What scope 0.3.2 has:** `BoundedMailbox::try_recv` frees a place and wakes nobody;
-  `BoundedSender::free` reports places; `WakeReason` has no capacity reason.
-- **Substitute here:** waiter lists in the runtime's Scope environment (`Shared::mailbox_waiters`,
-  `timer_waiters`, `child_waiters`), filled from the refusal reasons. A program task compares its
-  own mailbox's `free` before and after each poll (two extra locks per poll); when it grew, every
-  waiter is woken with `Cx::wake_with(task, WakeReason::Manual)` in registration order and a
-  `RuntimeEventKind::Released` event is recorded. Deterministic, because every receive happens
-  inside the runtime's own polls.
-- **Cost:** every waiter wakes for one freed place. Under 64 senders and one receiver
-  (`policy/fan_in_64x16`) that is 11.4 (`Retry`) and 14.4 (`Backpressure`) refused attempts per
-  commit (docs/MEASUREMENTS.md). Senders outside the runtime cannot wait this way.
-- **Minimal addition (scope):** `BoundedSender::wake_when_free(&self, waiter: TaskId)`, a FIFO of
-  waiters inside the bounded mailbox's shared state, and `WakeReason::Capacity`; `try_recv` and
-  `drain` wake as many waiters as places they freed, `close` (and the read end's drop) wakes all.
+- **What 0.1.0 did (scope 0.3.2):** waiter lists in the runtime's Scope environment
+  (`Shared::mailbox_waiters`), a compare of the program's own mailbox `free` before and after each
+  poll, and a wake of every waiter (`WakeReason::Manual`) with a `Released` event when it grew. Under
+  64 senders and one receiver (`policy/fan_in_64x16`) that was 11.4 (`Retry`) and 14.4
+  (`Backpressure`) refused attempts per committed step.
+- **What scope 0.4.0 has:** `BoundedSender::wake_when_free(task)` registers the task in the
+  mailbox, in arrival order; a receive holds each freed place for the oldest waiter and wakes it
+  (`WakeReason::Capacity`); `try_send_from(msg, task)` fills the held place; `free_for(task)`
+  counts it for admission; the `CapacityWait` the registration returns gives it up when dropped.
+- **Used here:** a program (or timer) refused `MailboxFull` for one place registers and keeps the
+  `CapacityWait`; admission counts `free_for`; deliveries go through `try_send_from`; a poll gives
+  up every registration its refusals no longer name, and the task's end gives up all of them.
+  `mailbox_waiters` and the before/after compare are gone. With 64 senders and one receiver:
+  1.41 (`Retry`) and 0.49 (`Backpressure`) refused attempts per committed step
+  (docs/MEASUREMENTS.md).
+- **What is left (cost):** two waits Scope cannot serve stay on a runtime list per mailbox
+  (`Shared::place_waiters`), woken when the place may have come free, with a `Released` event: a
+  sender to a program whose `Backpressure` input holds a place (item 2), and a step that needs
+  more than one place in one mailbox (a held place is one place; the step gives it up and waits
+  for unheld places, so two such senders never keep each other waiting, but it can wait long under
+  single-place contention).
+- **The shutdown word's place is gone too:** Scope 0.4 sees a place no sender may fill as free, so
+  the kept place of item 4 would make every full mailbox look open. The mailbox has exactly
+  `RuntimeLimits::mailbox` places and the run wakes each program at shutdown through
+  `Scope::waker_for(.., WakeReason::Shutdown)`.
 
 ## 2. scope: look at the head of a bounded mailbox without taking it
 
+- **Status: still missing.** Since 0.2.0 it is also why a runtime waiter list is left (item 1):
+  Scope sees the place a held input takes as free, so a sender to that program cannot wait
+  through Scope and waits on the runtime's list instead.
 - **Needed by:** `Backpressure`, whose refused input should stay in the mailbox, still taking its
   place.
 - **What scope 0.3.2 has:** `try_recv`, `drain`, `len`, `is_empty`; no peek.
@@ -45,10 +60,12 @@ named here.
 
 ## 4. scope: a reserved place for control messages
 
-- **Substitute here (kept):** every mailbox has `mailbox + 1` places and the runtime's own `free`
-  subtracts the one kept for the shutdown word.
-- **Minimal addition (scope):** a `try_send_reserved` (or a one-message control lane) on
-  `BoundedSender`.
+- **Status: not needed since 0.2.0.** 0.1.0 gave every mailbox `mailbox + 1` places and its own
+  `free` subtracted the one kept for the shutdown word. That place is gone (item 1): the shutdown
+  wake goes through `Scope::waker_for(.., WakeReason::Shutdown)`, which scope 0.3.2 already had, and
+  the shutdown flag is read first on every poll.
+- **Minimal addition (scope), if a control message is ever needed again:** a `try_send_reserved`
+  (or a one-message control lane) on `BoundedSender`.
 
 ## 5. uuid_macros: per-kind namespaces, ordering, and no forced v4
 

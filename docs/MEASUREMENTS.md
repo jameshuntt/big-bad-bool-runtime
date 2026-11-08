@@ -1,5 +1,64 @@
 # Measurements
 
+## 0.2.0: waiting through scope 0.4.0's capacity waiters (2026-11-08)
+
+`cargo bench --bench runtime`, the same benches and settings as below, run twice in a row on
+2026-11-08: 0.1.0 (commit a6b3933, built in attempts_runtime_wake_validation/bench_before with its
+own Cargo.lock: scope 0.3.2 from crates.io) at 08:34:06 to 08:35:30 EST, then this branch (commit
+5037941: scope 0.4.0 from the `capacity-waiters` checkout through the `[patch.crates-io]`) at
+08:40:53 to 08:42:14 EST. Apple M4 Pro, macOS 15.7.5, **on battery** (87% to 83%, discharging),
+rustc 1.97.1. Numbers are Criterion's [low estimate high]. Nothing was optimized for the bench.
+
+| Benchmark | 0.1.0 | 0.2.0 | change |
+|---|---|---|---|
+| steps/bare_stepper_push | [10.248 ms 10.335 ms 10.416 ms] | [10.366 ms 11.238 ms 12.570 ms] | +8.7% |
+| steps/prepare_commit | [10.152 ms 10.213 ms 10.268 ms] | [10.293 ms 10.349 ms 10.403 ms] | +1.3% |
+| steps/runtime_prepare_admit_commit_unrouted | [24.292 ms 24.386 ms 24.444 ms] | [24.315 ms 24.423 ms 24.646 ms] | +0.2% |
+| steps/runtime_volley_routed | [16.066 ms 16.130 ms 16.199 ms] | [16.067 ms 16.165 ms 16.286 ms] | +0.2% |
+| steps/runtime_volley_routed_full_trace | [36.689 ms 36.871 ms 36.972 ms] | [35.917 ms 37.279 ms 40.190 ms] | +1.1% |
+| admission/refusal_prepare_admit_refuse | [13.861 ms 13.923 ms 13.961 ms] | [13.878 ms 13.962 ms 14.056 ms] | +0.3% |
+| policy/fan_in_64x16/consume | [2.1668 ms 2.1799 ms 2.1881 ms] | [2.1467 ms 2.1569 ms 2.1692 ms] | -1.1% |
+| policy/fan_in_64x16/retry | [47.168 ms 47.399 ms 47.555 ms] | [9.5764 ms 9.9317 ms 10.437 ms] | -79.0% |
+| policy/fan_in_64x16/backpressure | [60.595 ms 60.940 ms 61.398 ms] | [6.3959 ms 6.4283 ms 6.5038 ms] | -89.5% |
+| timer/logical_metronome_1000_beats | [1.8715 ms 1.8829 ms 1.8959 ms] | [1.8159 ms 1.8339 ms 1.8527 ms] | -2.6% |
+| scheduler/scope_mailbox_bounce | [486.69 µs 490.18 µs 493.16 µs] | [482.76 µs 483.35 µs 484.09 µs] | -1.4% |
+| scheduler/scope_bounded_bounce | [492.25 µs 495.43 µs 500.09 µs] | [489.40 µs 492.71 µs 495.20 µs] | -0.5% |
+| instances/independent_sinks_4_hits/1 | [13.652 µs 13.784 µs 13.893 µs] | [13.548 µs 13.629 µs 13.803 µs] | -1.1% |
+| instances/independent_sinks_4_hits/10 | [126.07 µs 127.63 µs 128.73 µs] | [125.09 µs 125.77 µs 126.42 µs] | -1.5% |
+| instances/independent_sinks_4_hits/100 | [1.2122 ms 1.3144 ms 1.3715 ms] | [1.1752 ms 1.1797 ms 1.1878 ms] | -10.2% |
+| instances/independent_sinks_4_hits/1000 | [15.650 ms 16.281 ms 17.063 ms] | [11.709 ms 11.733 ms 11.754 ms] | -27.9% |
+| instances/rally_pairs_instances/2 | [38.317 µs 40.850 µs 42.875 µs] | [29.024 µs 29.247 µs 29.406 µs] | -28.4% |
+| instances/rally_pairs_instances/10 | [176.05 µs 188.33 µs 196.57 µs] | [140.19 µs 140.54 µs 140.79 µs] | -25.4% |
+| instances/rally_pairs_instances/100 | [1.6649 ms 1.7489 ms 1.8469 ms] | [1.3335 ms 1.3399 ms 1.3460 ms] | -23.4% |
+| instances/rally_pairs_instances/1000 | [19.844 ms 20.333 ms 20.726 ms] | [13.386 ms 13.610 ms 13.786 ms] | -33.1% |
+| fan_out/one_commit_to_k_sinks/1 | [11.997 µs 12.446 µs 12.876 µs] | [9.9880 µs 10.075 µs 10.204 µs] | -19.1% |
+| fan_out/one_commit_to_k_sinks/8 | [56.994 µs 59.801 µs 61.845 µs] | [43.153 µs 43.241 µs 43.370 µs] | -27.7% |
+| fan_out/one_commit_to_k_sinks/64 | [323.24 µs 342.73 µs 385.20 µs] | [305.60 µs 329.70 µs 359.34 µs] | -3.8% |
+| trace/rally_100_pairs/off | [2.7592 ms 2.7707 ms 2.7828 ms] | [2.7940 ms 2.8150 ms 2.8588 ms] | +1.6% |
+| trace/rally_100_pairs/full | [4.8638 ms 5.2263 ms 5.4651 ms] | [4.5421 ms 4.5857 ms 4.6567 ms] | -12.3% |
+| idle/volley_2000_steps_with_idle/0 | [3.2985 ms 3.3424 ms 3.3765 ms] | [3.1604 ms 3.1907 ms 3.2236 ms] | -4.5% |
+| idle/volley_2000_steps_with_idle/100 | [3.4661 ms 3.4904 ms 3.5259 ms] | [3.3844 ms 3.4162 ms 3.4574 ms] | -2.1% |
+| idle/volley_2000_steps_with_idle/1000 | [4.7865 ms 4.9466 ms 5.0616 ms] | [4.7728 ms 4.8427 ms 4.8930 ms] | -2.1% |
+
+What the numbers say, and only that:
+
+- `policy/fan_in_64x16` (64 casters x 16 starts, one sink with 16 places): under `Retry` 2,881
+  refused attempts for the 2,048 committed steps, 1.41 per step, against 23,363 (11.41 per step) in
+  0.1.0; under `Backpressure` 1,008 (0.49 per step) against 29,526 (14.42). The time follows: 47.4 ms
+  to 9.93 ms (`Retry`), 60.9 ms to 6.43 ms (`Backpressure`). `Consume` refuses the same 993. A freed
+  place now wakes one waiting caster and is held for it, where 0.1.0 woke every waiting caster.
+- The other shapes have nobody waiting for a mailbox place. The ones that run no runtime code at all
+  (`steps/bare_stepper_push`, `steps/prepare_commit`) moved +8.7% and +1.3% between the two runs,
+  and the 0.1.0 run's `instances/*` and `fan_out/*` estimates have wide ranges, so differences of
+  that size here are the two runs, not the change. `scheduler/scope_bounded_bounce` (Scope's bounded
+  mailbox alone, no waiter) is -0.5%: the no-waiter paths of scope 0.4.0's `try_recv` and
+  `try_send` cost what 0.3.2's did (at scope d6bf9d2 this bench was 5% slower; 7100203 fixed it).
+- The Custodian record in attempts_runtime_wake_validation runs the same runtime on both scopes over
+  a grid of senders, places, policies, orderings and workloads, with every gate; its uncontended
+  nodes put the change within 2% per commit.
+
+## 0.1.0 (2026-11-07)
+
 `cargo bench --bench runtime` (benches/runtime.rs), 2026-11-07, 09:31:55 to 09:33:21 EST (86 s),
 one run. Criterion 0.5.1, 10 samples, 0.5 s warm-up, 2 s measurement per benchmark, as the
 registry experiment and v2. Numbers are Criterion's [low estimate high]. Nothing was optimized.
